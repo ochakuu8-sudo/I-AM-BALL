@@ -20,7 +20,7 @@ export class TownGame {
   renderer: THREE.WebGLRenderer;
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(52, 1, 0.12, 350);
-  sun = new THREE.DirectionalLight(0xfff4db, 3.2);
+  sun = new THREE.DirectionalLight(0xffffff, 3.0);
   sim!: TownSimulation;
   visuals: Visual[] = [];
   keys = new Set<string>();
@@ -108,14 +108,14 @@ export class TownGame {
       ),
     );
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.08;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.toneMapping = THREE.NeutralToneMapping;
+    this.renderer.toneMappingExposure = 1.0;
     this.host.appendChild(this.renderer.domElement);
     this.renderer.domElement.tabIndex = 0;
-    this.scene.background = new THREE.Color('#b9d9e4');
-    this.scene.fog = new THREE.Fog('#b9d9e4', 80, 230);
-    this.scene.add(new THREE.HemisphereLight(0xd7ecfa, 0x697947, 2.0));
+    this.scene.background = new THREE.Color('#68c9f5');
+    this.scene.fog = new THREE.Fog('#68c9f5', 125, 260);
+    this.scene.add(new THREE.HemisphereLight(0xe5f4ff, 0x568840, 1.1));
     this.sun.position.set(-35, 60, -20);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -145,15 +145,17 @@ export class TownGame {
   }
   async init() {
     const loader = new GLTFLoader();
+    const model = (file: string) =>
+      `./models/${file}?v=${__TOWN_ASSET_VERSION__}`;
     const [_, gltf, layout, crate, cone] = await Promise.all([
       RAPIER.init(),
-      loader.loadAsync('./models/town.glb'),
-      fetch('./models/colliders.json').then((r) => {
+      loader.loadAsync(model('town.glb')),
+      fetch(model('colliders.json')).then((r) => {
         if (!r.ok) throw Error('街のデータを読み込めませんでした');
         return r.json() as Promise<Layout>;
       }),
-      loader.loadAsync('./models/crate.glb'),
-      loader.loadAsync('./models/cone.glb'),
+      loader.loadAsync(model('crate.glb')),
+      loader.loadAsync(model('cone.glb')),
     ]);
     if (this.dead) return;
     gltf.scene.traverse((o) => {
@@ -200,7 +202,7 @@ export class TownGame {
     const sphere = new THREE.Mesh(
       new THREE.SphereGeometry(TUNING.radius, 40, 28),
       new THREE.MeshStandardMaterial({
-        color: '#fff5df',
+        color: '#f64042',
         roughness: 0.3,
         metalness: 0.1,
       }),
@@ -209,7 +211,7 @@ export class TownGame {
     sphere.receiveShadow = true;
     this.ballGroup.add(sphere);
     const stripe = new THREE.MeshStandardMaterial({
-      color: '#e36d43',
+      color: '#fff9e7',
       roughness: 0.35,
       metalness: 0.05,
     });
@@ -223,7 +225,7 @@ export class TownGame {
       this.ballGroup.add(band);
     }
     const capMat = new THREE.MeshStandardMaterial({
-      color: '#364f5e',
+      color: '#163956',
       roughness: 0.3,
     });
     for (const y of [-1, 1]) {

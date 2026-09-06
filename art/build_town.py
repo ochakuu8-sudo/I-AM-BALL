@@ -10,11 +10,25 @@ OUT.mkdir(parents=True,exist_ok=True); ART.mkdir(parents=True,exist_ok=True)
 bpy.ops.object.select_all(action='SELECT'); bpy.ops.object.delete(use_global=False)
 M={}
 def mat(name,hex,rough=.8,metal=0):
-    c=tuple(int(hex[i:i+2],16)/255 for i in (0,2,4))
+    # Design swatches are sRGB; Blender node colors and glTF factors are linear.
+    # Writing sRGB numbers directly here made the exported town look washed out.
+    srgb=tuple(int(hex[i:i+2],16)/255 for i in (0,2,4))
+    c=tuple(v/12.92 if v<=.04045 else ((v+.055)/1.055)**2.4 for v in srgb)
     m=bpy.data.materials.new(name); m.diffuse_color=(*c,1); m.use_nodes=True
     p=m.node_tree.nodes.get('Principled BSDF'); p.inputs['Base Color'].default_value=(*c,1);p.inputs['Roughness'].default_value=rough;p.inputs['Metallic'].default_value=metal
     M[name]=m;return m
-for n,c in [('plaster','edcda4'),('plaster_blue','88b8c7'),('plaster_rose','d89878'),('plaster_white','e8e4d2'),('roof','436678'),('roof_light','55798a'),('roof_rust','b46545'),('roof_rust_light','c98558'),('trim','f8efd7'),('wood','855741'),('door','41666e'),('metal','3b5156'),('glass','568e9e'),('glass_light','9bced4'),('stone','b3b3a2'),('asphalt','566c76'),('walk','cccfbf'),('grass','85af62'),('grass_dark','719954'),('leaf','487b49'),('leaf_light','70a157'),('leaf_bright','93b763'),('trunk','715741'),('yellow','efbb49'),('white','f8f5df'),('red','cb694f'),('blue','6395b3'),('pot','b77a58'),('flower','efbd67'),('rubber','2a3d43'),('water','73aabc')]:mat(n,c,.27 if n.startswith('glass') else .85,.2 if n=='metal' else 0)
+PALETTE={
+    'plaster':'FFD45E','plaster_blue':'49BFFF','plaster_rose':'FF8E74',
+    'plaster_white':'FFF4DE','roof':'2666C5','roof_light':'4D8FED',
+    'roof_rust':'F15B36','roof_rust_light':'FF8755','trim':'FFF9E9',
+    'wood':'98613B','door':'1B75AA','metal':'254866','glass':'167CBD',
+    'glass_light':'8CE8FF','stone':'87959E','asphalt':'485B70',
+    'walk':'D7DCE3','grass':'63C838','grass_dark':'46AE35',
+    'leaf':'238A35','leaf_light':'4DBB37','leaf_bright':'8DD845',
+    'trunk':'795039','yellow':'FFC928','white':'FFFDF4','red':'FF5138',
+    'blue':'279AF5','pot':'E77040','flower':'FFCE2C','rubber':'24313C','water':'35B7ED',
+}
+for n,c in PALETTE.items():mat(n,c,.27 if n.startswith('glass') else .85,.2 if n=='metal' else 0)
 def p(x,y,z):return (x,-z,y)
 def box(name,loc,dim,material,bevel=0,rot=0):
     bpy.ops.mesh.primitive_cube_add(size=1,location=p(*loc));o=bpy.context.object;o.name=name;o.dimensions=(dim[0],dim[2],dim[1]);o.rotation_euler.z=rot
@@ -138,12 +152,12 @@ def export(objects,path):
 def lighting(camloc=(15,12,19),target=(0,3,0),ortho=18):
     scene=bpy.context.scene;scene.render.engine='CYCLES';scene.cycles.samples=24
     scene.world.color=(.32,.38,.43)
-    scene.world.use_nodes=True;scene.world.node_tree.nodes['Background'].inputs[0].default_value=(.60,.74,.83,1);scene.world.node_tree.nodes['Background'].inputs[1].default_value=.8
-    bpy.ops.object.light_add(type='AREA',location=p(-9,17,10));light=bpy.context.object;light.data.energy=1800;light.data.shape='DISK';light.data.size=10
+    scene.world.use_nodes=True;scene.world.node_tree.nodes['Background'].inputs[0].default_value=(.76,.86,1,1);scene.world.node_tree.nodes['Background'].inputs[1].default_value=.5
+    bpy.ops.object.light_add(type='AREA',location=p(-9,17,10));light=bpy.context.object;light.data.energy=1100;light.data.shape='DISK';light.data.size=10
     bpy.ops.object.light_add(type='SUN',location=p(-20,30,-10));sun=bpy.context.object;sun.data.energy=2;sun.rotation_euler=(.4,-.5,-.7);sun.data.angle=.14
     bpy.ops.object.camera_add(location=p(*camloc));cam=bpy.context.object;cam.rotation_euler=(Vector(p(*target))-cam.location).to_track_quat('-Z','Y').to_euler();cam.data.type='ORTHO';cam.data.ortho_scale=ortho;scene.camera=cam
     scene.render.resolution_x=1100;scene.render.resolution_y=900;scene.render.resolution_percentage=100
-    scene.view_settings.view_transform='AgX'
+    scene.view_settings.view_transform='Standard';scene.view_settings.exposure=-.15
     return [light,sun,cam]
 # Save a separately editable hero house and a clean render.
 hero=house(0);export(hero,OUT/'house.glb')
