@@ -1,0 +1,63 @@
+{
+  "tests": [
+    {
+      "test": "A strike has three distinct scales, forward motion, and a two-sided fan",
+      "status": "pass",
+      "initial": 35,
+      "remainingAfter0_8Seconds": {
+        "small": 12,
+        "medium": 10,
+        "large": 3,
+        "physicsBodies": 3,
+        "capacity": 384
+      }
+    },
+    {
+      "test": "Shards inherit vertex colors and wood splinters use slim silhouettes",
+      "status": "pass",
+      "woodenShards": 35
+    },
+    {
+      "test": "Only large chunks collide; their colliders fit shards and leave a wall breach passable",
+      "status": "pass",
+      "ballX": -13.640390396118164,
+      "fragments": {
+        "small": 72,
+        "medium": 32,
+        "large": 8,
+        "physicsBodies": 8,
+        "capacity": 384
+      }
+    },
+    {
+      "test": "A whole-house collapse emits bounded delayed waves with downward velocity",
+      "status": "pass",
+      "destroyedParts": 48,
+      "fragments": 107,
+      "physicsBodies": 11
+    },
+    {
+      "test": "Repeated hits and many buildings respect global particle and rigid-body caps",
+      "status": "pass",
+      "maxFragments": 384,
+      "maxBodies": 24,
+      "emptyAfterSeconds": 4
+    },
+    {
+      "test": "Reset cancels delayed collapses and pooled bodies never create ghost debris",
+      "status": "pass",
+      "restoredParts": 1069,
+      "pooledBodiesReusable": true
+    },
+    {
+      "test": "Fragment motion is identical at 30, 60, and 144 Hz rendering",
+      "status": "pass",
+      "renderRates": [
+        30,
+        60,
+        144
+      ],
+      "fixedSteps": 60
+    }
+  ]
+}

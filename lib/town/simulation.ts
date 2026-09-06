@@ -17,20 +17,38 @@ export type Piece = {
   definition: PieceDefinition;
   body: RAPIER.RigidBody;
   collider: RAPIER.Collider;
-  state: 'intact' | 'debris' | 'gone';
+  state: 'intact' | 'collapsing' | 'gone';
   age: number;
 };
+export type BreakSource = {
+  id: string;
+  kind: string;
+  position: Vec;
+  rotation: { x: number; y: number; z: number; w: number };
+  half: Vec;
+};
+export type BreakBurst = {
+  group: string;
+  mode: 'impact' | 'collapse';
+  wave: number;
+  sources: BreakSource[];
+  velocity: Vec;
+  origin: Vec;
+};
 type Prop = {
+  id: string;
   body: RAPIER.RigidBody;
   collider: RAPIER.Collider;
   type: string;
   spawn: number[];
   broken: boolean;
-  fragments: Piece[];
 };
-export const DESTRUCTION = { maxDebris: 80, lifetime: 7, shrinkTime: 1 };
+export const DESTRUCTION = {
+  collapseLow: 0.12,
+  collapseHigh: 0.24,
+  maxBursts: 32,
+};
 const INTACT_GROUPS = (4 << 16) | 2;
-const DEBRIS_GROUPS = (8 << 16) | (1 | 2);
 export type Layout = {
   colliders: Array<{
     kind: string;
@@ -65,7 +83,15 @@ export class TownSimulation {
   ballCollider: RAPIER.Collider;
   props: Prop[] = [];
   pieces: Piece[] = [];
-  debris: Piece[] = [];
+  collapsing: Array<{
+    piece: Piece;
+    delay: number;
+    velocity: Vec;
+    origin: Vec;
+    wave: number;
+  }> = [];
+  breakBursts: BreakBurst[] = [];
+  revision = 0;
   groups = new Map<string, Piece[]>();
   breakableColliders = new Map<number, Piece | Prop>();
   events = new RAPIER.EventQueue(true);
@@ -170,30 +196,14 @@ export class TownSimulation {
         b,
       );
       const prop: Prop = {
+        id: `prop_${this.props.length}`,
         body: b,
         collider,
         type: p.type,
         spawn: p.position,
         broken: false,
-        fragments: [],
       };
       if (p.type === 'crate') {
-        for (let i = 0; i < 6; i++) {
-          prop.fragments.push(
-            this.addPiece({
-              id: `crate_${this.props.length}_${i}`,
-              group: `crate_${this.props.length}`,
-              kind: 'crate',
-              level: 0,
-              section: '',
-              hidden: true,
-              position: p.position,
-              half: [0.48, 0.085, 0.22],
-              rotation: [0, 0, 0, 1],
-              strength: 6,
-            }),
-          );
-        }
         this.breakableColliders.set(collider.handle, prop);
       }
       this.props.push(prop);
@@ -209,10 +219,7 @@ export class TownSimulation {
     const body = this.world.createRigidBody(
       RAPIER.RigidBodyDesc.fixed()
         .setTranslation(x, y, z)
-        .setRotation({ x: qx, y: qy, z: qz, w: qw })
-        .setLinearDamping(0.45)
-        .setAngularDamping(0.7)
-        .setCcdEnabled(true),
+        .setRotation({ x: qx, y: qy, z: qz, w: qw }),
     );
     const h = definition.half;
     const collider = this.world.createCollider(
@@ -238,43 +245,83 @@ export class TownSimulation {
     this.breakableColliders.set(collider.handle, piece);
     return piece;
   }
-  retire(piece: Piece) {
-    piece.state = 'gone';
-    piece.body.setEnabled(false);
+  takeBreakBursts() {
+    const bursts = this.breakBursts;
+    this.breakBursts = [];
+    return bursts;
   }
-  detach(piece: Piece, velocity: Vec, origin: Vec) {
-    if (piece.state === 'debris') return;
-    if (piece.state === 'gone' && !piece.definition.hidden) return;
-    while (this.debris.length >= DESTRUCTION.maxDebris)
-      this.retire(this.debris.shift()!);
-    piece.state = 'debris';
-    piece.age = 0;
-    piece.body.setEnabled(true);
-    piece.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
-    piece.collider.setCollisionGroups(DEBRIS_GROUPS);
-    const p = piece.body.translation();
-    const angle = this.brokenCount * 2.39996;
-    const dx = p.x - origin.x,
-      dz = p.z - origin.z;
-    const length = Math.hypot(dx, dz) || 1;
-    piece.body.setLinvel(
+  queueBurst(
+    group: string,
+    source: BreakSource,
+    velocity: Vec,
+    origin: Vec,
+    mode: BreakBurst['mode'],
+    wave = 0,
+  ) {
+    let burst = this.breakBursts.find(
+      (b) => b.group === group && b.mode === mode && b.wave === wave,
+    );
+    if (!burst) {
+      if (this.breakBursts.length >= DESTRUCTION.maxBursts)
+        this.breakBursts.shift();
+      burst = {
+        group,
+        mode,
+        wave,
+        sources: [],
+        velocity: { ...velocity },
+        origin: { ...origin },
+      };
+      this.breakBursts.push(burst);
+    }
+    burst.sources.push(source);
+  }
+  emitPiece(
+    piece: Piece,
+    velocity: Vec,
+    origin: Vec,
+    mode: BreakBurst['mode'],
+    wave = 0,
+  ) {
+    const d = piece.definition;
+    this.queueBurst(
+      d.group,
       {
-        x: velocity.x * 0.45 + (dx / length) * 2 + Math.sin(angle),
-        y: 3.2 + Math.min(3, Math.abs(velocity.y) * 0.25),
-        z: velocity.z * 0.45 + (dz / length) * 2 + Math.cos(angle),
+        id: d.id,
+        kind: d.kind,
+        position: { ...piece.body.translation() },
+        rotation: { ...piece.body.rotation() },
+        half: { x: d.half[0], y: d.half[1], z: d.half[2] },
       },
-      true,
+      velocity,
+      origin,
+      mode,
+      wave,
     );
-    piece.body.setAngvel(
-      { x: Math.cos(angle) * 3, y: Math.sin(angle) * 2, z: 2 },
-      true,
-    );
-    this.debris.push(piece);
+    piece.state = 'gone';
+  }
+  destroy(piece: Piece, velocity: Vec, origin: Vec, collapse = false) {
+    if (piece.state !== 'intact') return;
+    // Remove the original collider immediately; small fragments cannot become invisible walls.
+    piece.body.setEnabled(false);
+    piece.age = 0;
     this.brokenCount++;
+    if (collapse) {
+      const wave =
+        piece.definition.level >= 2 || piece.definition.kind === 'roof' ? 1 : 0;
+      piece.state = 'collapsing';
+      this.collapsing.push({
+        piece,
+        velocity: { ...velocity },
+        origin: { ...origin },
+        wave,
+        delay: wave ? DESTRUCTION.collapseHigh : DESTRUCTION.collapseLow,
+      });
+    } else this.emitPiece(piece, velocity, origin, 'impact');
   }
   breakPiece(piece: Piece, velocity: Vec, origin: Vec) {
     if (piece.state !== 'intact') return;
-    this.detach(piece, velocity, origin);
+    this.destroy(piece, velocity, origin);
     const d = piece.definition;
     const siblings = this.groups.get(d.group)!;
     if (d.kind === 'wall') {
@@ -288,7 +335,7 @@ export class TownSimulation {
             p.definition.level === 1 &&
             p.definition.section === d.section
           )
-            this.detach(p, velocity, origin);
+            this.destroy(p, velocity, origin, true);
       }
       const supports = siblings.filter(
         (p) => p.definition.kind === 'wall' && p.definition.level === 0,
@@ -298,13 +345,13 @@ export class TownSimulation {
         Math.ceil(supports.length * 0.35)
       ) {
         for (const p of siblings)
-          if (p.state === 'intact') this.detach(p, velocity, origin);
+          if (p.state === 'intact') this.destroy(p, velocity, origin, true);
       }
     } else if (
       ['tree', 'lamp', 'bin', 'pot', 'bench', 'car', 'tower'].includes(d.kind)
     ) {
       for (const p of siblings)
-        if (p.state === 'intact') this.detach(p, velocity, origin);
+        if (p.state === 'intact') this.destroy(p, velocity, origin);
     }
   }
   handleImpacts(velocity: Vec, origin: Vec) {
@@ -339,14 +386,20 @@ export class TownSimulation {
         const p = target.body.translation();
         const q = target.body.rotation();
         target.body.setEnabled(false);
-        target.fragments.forEach((piece, i) => {
-          piece.body.setTranslation(
-            { x: p.x, y: p.y + (i - 2.5) * 0.17, z: p.z },
-            true,
-          );
-          piece.body.setRotation(q, true);
-          this.detach(piece, velocity, origin);
-        });
+        this.brokenCount++;
+        this.queueBurst(
+          target.id,
+          {
+            id: target.id,
+            kind: target.type,
+            position: { ...p },
+            rotation: { ...q },
+            half: { x: 0.5, y: 0.5, z: 0.5 },
+          },
+          velocity,
+          origin,
+          'impact',
+        );
       }
     }
     if (this.brokenCount > count) {
@@ -432,12 +485,20 @@ export class TownSimulation {
     const impactVelocity = { ...this.ball.linvel() };
     this.world.step(this.events);
     this.handleImpacts(impactVelocity, p);
-    for (const piece of this.debris) {
-      piece.age += dt;
-      if (piece.age >= DESTRUCTION.lifetime || piece.body.translation().y < -12)
-        this.retire(piece);
+    for (let i = this.collapsing.length - 1; i >= 0; i--) {
+      const pending = this.collapsing[i];
+      pending.piece.age += dt;
+      if (pending.piece.age >= pending.delay) {
+        this.emitPiece(
+          pending.piece,
+          pending.velocity,
+          pending.origin,
+          'collapse',
+          pending.wave,
+        );
+        this.collapsing.splice(i, 1);
+      }
     }
-    this.debris = this.debris.filter((p) => p.state === 'debris');
     const next = this.ball.translation();
     this.distance += Math.hypot(
       next.x - this.lastPosition.x,
@@ -487,7 +548,9 @@ export class TownSimulation {
       piece.age = 0;
       piece.body.setEnabled(!d.hidden);
     }
-    this.debris = [];
+    this.collapsing = [];
+    this.breakBursts = [];
+    this.revision++;
     this.brokenCount = 0;
     this.impactSerial = 0;
     this.events.clear();

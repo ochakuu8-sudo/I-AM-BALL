@@ -113,10 +113,10 @@ test('A fast ball breaches separate facade panels', (sim) => {
     'An invisible wall remained after the breach',
   );
   assert.ok(
-    sim.debris.some(
-      (p) =>
-        Math.hypot(p.body.linvel().x, p.body.linvel().y, p.body.linvel().z) > 1,
-    ),
+    sim.breakBursts.some((b) => b.mode === 'impact' && b.velocity.x < -10),
+  );
+  assert.ok(
+    house.filter((p) => p.state !== 'intact').every((p) => !p.body.isEnabled()),
   );
   return {
     brokenPanels: broken,
@@ -137,19 +137,17 @@ test('A gentle bump moves a crate without shattering it', (sim) => {
   assert.equal(crate.broken, false);
   return { crateTravel: moved };
 });
-test('A fast crate impact produces separate moving planks', (sim) => {
+test('A fast crate impact replaces the crate with a wood fracture event', (sim) => {
   const crate = sim.props.find((p) => p.type === 'crate' && p.spawn[0] === 29);
   tick(sim, 30);
   place(sim, 29, 0.74, 17, 0, 0, 18);
   tick(sim, 24, 0, 1);
   assert.equal(crate.broken, true);
   assert.equal(crate.body.isEnabled(), false);
-  assert.ok(crate.fragments.every((p) => p.state === 'debris'));
-  assert.ok(
-    new Set(crate.fragments.map((p) => p.body.translation().x.toFixed(2)))
-      .size > 1,
-  );
-  return { planks: crate.fragments.length };
+  const burst = sim.takeBreakBursts().find((b) => b.group === crate.id);
+  assert.equal(burst.sources[0].kind, 'crate');
+  assert.ok(burst.velocity.z > 10);
+  return { replacementSources: burst.sources.length };
 });
 
 test('Unbroken walls stop a low-speed push', (sim) => {
@@ -172,27 +170,38 @@ test('Losing supporting walls collapses upper storeys and the roof', (sim) => {
     sim.breakPiece(p, velocity, origin);
   assert.ok(house.every((p) => p.state !== 'intact'));
   assert.ok(
-    house.some((p) => p.definition.kind === 'roof' && p.state === 'debris'),
+    house.some((p) => p.definition.kind === 'roof' && p.state === 'collapsing'),
   );
+  sim.takeBreakBursts();
+  tick(sim, 8);
+  assert.ok(
+    sim.takeBreakBursts().some((b) => b.mode === 'collapse' && b.wave === 0),
+  );
+  assert.ok(
+    house.some((p) => p.definition.kind === 'roof' && p.state === 'collapsing'),
+  );
+  tick(sim, 8);
+  assert.ok(
+    sim.takeBreakBursts().some((b) => b.mode === 'collapse' && b.wave === 1),
+  );
+  assert.ok(house.every((p) => p.state === 'gone' && !p.body.isEnabled()));
   return { collapsedParts: house.length };
 });
 
-test('Debris stays within its budget, expires, and reset restores every part', (sim) => {
+test('Break events are bounded and reset restores every original collider', (sim) => {
   const velocity = { x: 10, y: 0, z: 0 },
     origin = sim.ball.translation();
   for (const p of sim.pieces.slice(0, 200))
     if (p.state === 'intact') sim.breakPiece(p, velocity, origin);
-  assert.ok(sim.debris.length <= DESTRUCTION.maxDebris);
-  assert.ok(
-    sim.pieces.filter((p) => p.body.isEnabled() && p.body.isDynamic()).length <=
-      DESTRUCTION.maxDebris,
-  );
+  assert.ok(sim.breakBursts.length <= DESTRUCTION.maxBursts);
+  assert.equal(sim.pieces.filter((p) => p.body.isDynamic()).length, 0);
   place(sim, -65, 0.74, 0);
-  tick(sim, 60 * (DESTRUCTION.lifetime + 1), 0, 0, true);
-  assert.equal(sim.debris.length, 0);
+  tick(sim, 60, 0, 0, true);
+  assert.equal(sim.collapsing.length, 0);
   for (const p of sim.pieces.filter((p) => p.state === 'gone'))
     assert.equal(p.body.isEnabled(), false);
   sim.reset();
+  assert.equal(sim.takeBreakBursts().length, 0);
   assert.equal(sim.brokenCount, 0);
   assert.ok(
     sim.pieces
@@ -212,7 +221,10 @@ test('Debris stays within its budget, expires, and reset restores every part', (
       ) < 0.0001,
     );
   }
-  return { restoredParts: sim.pieces.length, maxDebris: DESTRUCTION.maxDebris };
+  return {
+    restoredParts: sim.pieces.length,
+    maxQueuedBursts: DESTRUCTION.maxBursts,
+  };
 });
 
 test('Street ramp sends a rolling ball into the air', (sim) => {

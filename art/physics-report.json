@@ -34,7 +34,7 @@
       "status": "pass",
       "brokenPanels": 6,
       "remainingPanels": 42,
-      "ballX": -13.71066665649414
+      "ballX": -13.654825210571289
     },
     {
       "test": "A gentle bump moves a crate without shattering it",
@@ -42,9 +42,9 @@
       "crateTravel": 0.5468544377272805
     },
     {
-      "test": "A fast crate impact produces separate moving planks",
+      "test": "A fast crate impact replaces the crate with a wood fracture event",
       "status": "pass",
-      "planks": 6
+      "replacementSources": 1
     },
     {
       "test": "Unbroken walls stop a low-speed push",
@@ -57,10 +57,10 @@
       "collapsedParts": 48
     },
     {
-      "test": "Debris stays within its budget, expires, and reset restores every part",
+      "test": "Break events are bounded and reset restores every original collider",
       "status": "pass",
-      "restoredParts": 1129,
-      "maxDebris": 80
+      "restoredParts": 1069,
+      "maxQueuedBursts": 32
     },
     {
       "test": "Street ramp sends a rolling ball into the air",
@@ -81,9 +81,9 @@
         144
       ],
       "position": {
-        "x": 19.58652114868164,
-        "y": 2.0127623081207275,
-        "z": 47.159366607666016
+        "x": 19.19672393798828,
+        "y": 0.705613374710083,
+        "z": 49.844078063964844
       }
     }
   ]

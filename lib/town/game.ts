@@ -4,12 +4,13 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import {
   TownSimulation,
   TUNING,
-  DESTRUCTION,
+  groundHeight,
   type Layout,
   type Piece,
 } from './simulation';
 import { registerGameTools } from './webmcp';
 import { CAMERA, OrbitInput, screenToWorld } from './controls';
+import { FractureEffects } from './fracture';
 export type GameStats = {
   speed: number;
   airborne: boolean;
@@ -29,8 +30,6 @@ type PieceVisual = {
   mesh: THREE.InstancedMesh;
   index: number;
   scale: THREE.Vector3;
-  prev: THREE.Vector3;
-  prevQ: THREE.Quaternion;
   renderedState: string;
 };
 export class TownGame {
@@ -40,6 +39,8 @@ export class TownGame {
   camera = new THREE.PerspectiveCamera(52, 1, 0.12, 350);
   sun = new THREE.DirectionalLight(0xffffff, 3.0);
   sim!: TownSimulation;
+  fracture!: FractureEffects;
+  simulationRevision = 0;
   visuals: Visual[] = [];
   pieceVisuals: PieceVisual[] = [];
   orbit = new OrbitInput();
@@ -205,6 +206,11 @@ export class TownGame {
     ]);
     if (this.dead) return;
     this.sim = new TownSimulation(layout);
+    this.fracture = new FractureEffects(
+      this.sim.world,
+      this.scene,
+      groundHeight,
+    );
     this.createPieceVisuals(gltf.scene);
     this.scene.add(gltf.scene);
     this.createBall();
@@ -212,6 +218,7 @@ export class TownGame {
     this.addVisual(this.sim.ball, this.ballGroup);
     for (const p of this.sim.props) {
       const object = (p.type === 'cone' ? cone : crate).scene.clone(true);
+      this.fracture.registerSource(p.id, p.type, object);
       this.scene.add(object);
       this.addVisual(p.body, object);
       this.visuals[this.visuals.length - 1].prop = p;
@@ -293,6 +300,11 @@ export class TownGame {
     for (const source of sources) {
       const piece = byId.get(source.userData.pieceId);
       if (!piece) throw Error(`Missing collider for ${source.name}`);
+      this.fracture.registerSource(
+        piece.definition.id,
+        piece.definition.kind,
+        source,
+      );
       const scale = new THREE.Vector3();
       source.matrixWorld.decompose(
         new THREE.Vector3(),
@@ -309,25 +321,6 @@ export class TownGame {
       batches.set(key, list);
       source.removeFromParent();
     }
-    const plank = new THREE.Mesh(
-      new THREE.BoxGeometry(1, 1, 1),
-      new THREE.MeshStandardMaterial({ color: '#bc8143', roughness: 0.85 }),
-    );
-    const fragments = this.sim.pieces.filter((p) => p.definition.hidden);
-    batches.set(
-      'crate-fragments',
-      fragments.map((piece) => ({
-        source: plank,
-        piece,
-        scale: new THREE.Vector3(
-          ...(piece.definition.half.map((h) => h * 2) as [
-            number,
-            number,
-            number,
-          ]),
-        ),
-      })),
-    );
     for (const list of batches.values()) {
       if (!list.length) continue;
       const source = list[0].source;
@@ -340,52 +333,34 @@ export class TownGame {
       mesh.frustumCulled = true;
       this.scene.add(mesh);
       list.forEach(({ piece, scale }, index) => {
-        const p = piece.body.translation(),
-          q = piece.body.rotation();
         this.pieceVisuals.push({
           piece,
           mesh,
           index,
           scale,
-          prev: new THREE.Vector3(p.x, p.y, p.z),
-          prevQ: new THREE.Quaternion(q.x, q.y, q.z, q.w),
           renderedState: '',
         });
       });
     }
-    if (sources.length !== this.sim.pieces.length - fragments.length)
+    if (
+      sources.length !==
+      this.sim.pieces.filter((p) => !p.definition.hidden).length
+    )
       throw Error('Some town parts have no visible mesh.');
-    this.updatePieceVisuals(1);
+    this.updatePieceVisuals();
   }
-  updatePieceVisuals(alpha: number) {
+  updatePieceVisuals() {
     const changed = new Set<THREE.InstancedMesh>();
     for (const v of this.pieceVisuals) {
       const p = v.piece;
-      if (p.state === v.renderedState && p.state !== 'debris') continue;
+      if (p.state === v.renderedState && p.state !== 'collapsing') continue;
       const position = p.body.translation(),
         rotation = p.body.rotation();
       this.temp.set(position.x, position.y, position.z);
       this.qtemp.set(rotation.x, rotation.y, rotation.z, rotation.w);
-      if (p.state === 'debris') {
-        if (v.renderedState !== 'debris') {
-          v.prev.copy(this.temp);
-          v.prevQ.copy(this.qtemp);
-        }
-        this.temp.lerpVectors(v.prev, this.temp, alpha);
-        this.qtemp.slerpQuaternions(v.prevQ, this.qtemp, alpha);
-      }
-      const size =
-        p.state === 'gone'
-          ? 0
-          : p.state === 'debris'
-            ? Math.min(
-                1,
-                Math.max(
-                  0,
-                  (DESTRUCTION.lifetime - p.age) / DESTRUCTION.shrinkTime,
-                ),
-              )
-            : 1;
+      if (p.state === 'collapsing')
+        this.temp.y -= Math.min(0.22, p.age * p.age * 8);
+      const size = p.state === 'gone' ? 0 : 1;
       this.matrix.compose(
         this.temp,
         this.qtemp,
@@ -423,7 +398,8 @@ export class TownGame {
       distanceMetres: this.sim.distance,
       jumps: this.sim.jumps,
       brokenPieces: this.sim.brokenCount,
-      activeDebris: this.sim.debris.length,
+      activeDebris: this.fracture.fragments.filter((f) => f.active).length,
+      fragments: this.fracture.getStats(),
       camera: {
         yaw: this.orbit.yaw,
         pitch: this.orbit.pitch,
@@ -478,6 +454,8 @@ export class TownGame {
   reset() {
     if (!this.sim) return;
     this.sim.reset();
+    this.fracture.reset();
+    this.simulationRevision = this.sim.revision;
     this.keys.clear();
     this.touch = { x: 0, z: 0 };
     this.brake = false;
@@ -485,7 +463,7 @@ export class TownGame {
     this.previousJump = 0;
     this.previousImpact = 0;
     for (const v of this.pieceVisuals) v.renderedState = '';
-    this.updatePieceVisuals(1);
+    this.updatePieceVisuals();
     for (const v of this.visuals) {
       const p = v.body.translation(),
         q = v.body.rotation();
@@ -527,13 +505,7 @@ export class TownGame {
           v.prev.set(p.x, p.y, p.z);
           v.prevQ.set(q.x, q.y, q.z, q.w);
         }
-        for (const v of this.pieceVisuals)
-          if (v.piece.state === 'debris') {
-            const p = v.piece.body.translation(),
-              q = v.piece.body.rotation();
-            v.prev.set(p.x, p.y, p.z);
-            v.prevQ.set(q.x, q.y, q.z, q.w);
-          }
+        this.fracture.beginStep();
         this.sim.step(
           direction.x,
           direction.z,
@@ -541,6 +513,11 @@ export class TownGame {
             this.keys.has('ShiftLeft') ||
             this.keys.has('ShiftRight'),
         );
+        if (this.simulationRevision !== this.sim.revision) {
+          this.fracture.reset();
+          this.simulationRevision = this.sim.revision;
+        }
+        this.fracture.afterStep(TUNING.step, this.sim.takeBreakBursts());
         this.accumulator -= TUNING.step;
       }
       const alpha = this.accumulator / TUNING.step;
@@ -564,7 +541,8 @@ export class TownGame {
         this.previousJump = this.sim.jumps;
       }
       this.updateCamera(elapsed);
-      this.updatePieceVisuals(alpha);
+      this.updatePieceVisuals();
+      this.fracture.render(alpha);
     }
     this.renderer.render(this.scene, this.camera);
     this.statsTime += elapsed;
@@ -634,6 +612,7 @@ export class TownGame {
     const geometries = new Set<THREE.BufferGeometry>(),
       materials = new Set<THREE.Material>(),
       textures = new Set<THREE.Texture>();
+    this.fracture?.dispose();
     this.scene.traverse((o) => {
       if (o instanceof THREE.Mesh) {
         if (o instanceof THREE.InstancedMesh) o.dispose();
