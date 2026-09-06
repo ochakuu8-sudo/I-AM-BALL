@@ -10,6 +10,7 @@ import {
 } from './simulation';
 import { registerGameTools } from './webmcp';
 import { OrbitInput, screenToWorld } from './controls';
+import { CameraBoom, cameraFov } from './camera';
 export type GameStats = {
   speed: number;
   airborne: boolean;
@@ -27,13 +28,11 @@ type Visual = {
 type PieceVisual = {
   piece: Piece;
   mesh: THREE.InstancedMesh;
-  ghost: THREE.InstancedMesh;
   index: number;
   scale: THREE.Vector3;
   prev: THREE.Vector3;
   prevQ: THREE.Quaternion;
   renderedState: string;
-  opacity: number;
 };
 export class TownGame {
   host: HTMLElement;
@@ -44,11 +43,8 @@ export class TownGame {
   sim!: TownSimulation;
   visuals: Visual[] = [];
   pieceVisuals: PieceVisual[] = [];
-  ghostMeshes: THREE.InstancedMesh[] = [];
   orbit = new OrbitInput();
-  cameraRadius = 17;
-  occludedGroups = new Map<string, number>();
-  cameraProbe = new RAPIER.Ball(0.3);
+  cameraBoom = new CameraBoom();
   matrix = new THREE.Matrix4();
   scaleTemp = new THREE.Vector3();
   previousImpact = 0;
@@ -74,8 +70,6 @@ export class TownGame {
   cameraDirection = new THREE.Vector3();
   previousJump = 0;
   unregisterTools = () => {};
-  shadowMaterial: THREE.MeshBasicMaterial | null = null;
-  ring: THREE.Mesh | null = null;
   onKeyDown = (e: KeyboardEvent) => {
     if (
       [
@@ -176,8 +170,6 @@ export class TownGame {
         matchMedia('(pointer:coarse)').matches ? 1.4 : 1.8,
       ),
     );
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.NeutralToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.host.appendChild(this.renderer.domElement);
@@ -186,19 +178,6 @@ export class TownGame {
     this.scene.fog = new THREE.Fog('#68c9f5', 125, 260);
     this.scene.add(new THREE.HemisphereLight(0xe5f4ff, 0x568840, 1.1));
     this.sun.position.set(-35, 60, -20);
-    this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
-    Object.assign(this.sun.shadow.camera, {
-      left: -30,
-      right: 30,
-      top: 32,
-      bottom: -32,
-      near: 1,
-      far: 130,
-    });
-    this.sun.shadow.bias = -0.00025;
-    this.sun.shadow.normalBias = 0.035;
-    this.sun.shadow.radius = 3;
     this.scene.add(this.sun, this.sun.target);
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(host);
@@ -229,24 +208,12 @@ export class TownGame {
     if (this.dead) return;
     this.sim = new TownSimulation(layout);
     this.createPieceVisuals(gltf.scene);
-    gltf.scene.traverse((o) => {
-      if (o instanceof THREE.Mesh) {
-        o.castShadow = !/Town_(grass|asphalt|walk|white)/.test(o.name);
-        o.receiveShadow = true;
-      }
-    });
     this.scene.add(gltf.scene);
     this.createBall();
     this.scene.add(this.ballGroup);
     this.addVisual(this.sim.ball, this.ballGroup);
     for (const p of this.sim.props) {
       const object = (p.type === 'cone' ? cone : crate).scene.clone(true);
-      object.traverse((o) => {
-        if (o instanceof THREE.Mesh) {
-          o.castShadow = true;
-          o.receiveShadow = true;
-        }
-      });
       this.scene.add(object);
       this.addVisual(p.body, object);
       this.visuals[this.visuals.length - 1].prop = p;
@@ -285,8 +252,6 @@ export class TownGame {
         metalness: 0.1,
       }),
     );
-    sphere.castShadow = true;
-    sphere.receiveShadow = true;
     this.ballGroup.add(sphere);
     const stripe = new THREE.MeshStandardMaterial({
       color: '#fff9e7',
@@ -299,7 +264,6 @@ export class TownGame {
         stripe,
       );
       band.rotation.y = rotation;
-      band.castShadow = true;
       this.ballGroup.add(band);
     }
     const capMat = new THREE.MeshStandardMaterial({
@@ -315,27 +279,6 @@ export class TownGame {
       cap.position.y = y * (TUNING.radius - 0.01);
       this.ballGroup.add(cap);
     }
-    // This soft contact cue remains readable on low-DPR mobile screens.
-    const c = document.createElement('canvas');
-    c.width = c.height = 64;
-    const ctx = c.getContext('2d')!,
-      gradient = ctx.createRadialGradient(32, 32, 3, 32, 32, 32);
-    gradient.addColorStop(0, 'rgba(25,40,40,0.34)');
-    gradient.addColorStop(1, 'rgba(25,40,40,0)');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 64, 64);
-    const texture = new THREE.CanvasTexture(c);
-    this.shadowMaterial = new THREE.MeshBasicMaterial({
-      map: texture,
-      transparent: true,
-      depthWrite: false,
-    });
-    this.ring = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.7, 2.7),
-      this.shadowMaterial,
-    );
-    this.ring.rotation.x = -Math.PI / 2;
-    this.scene.add(this.ring);
   }
   createPieceVisuals(root: THREE.Object3D) {
     const byId = new Map(this.sim.pieces.map((p) => [p.definition.id, p]));
@@ -387,18 +330,6 @@ export class TownGame {
         ),
       })),
     );
-    const ghostMaterials = new Map<THREE.Material, THREE.Material>();
-    const ghostMaterial = (material: THREE.Material) => {
-      let ghost = ghostMaterials.get(material);
-      if (!ghost) {
-        ghost = material.clone();
-        ghost.transparent = true;
-        ghost.opacity = 0.1;
-        ghost.depthWrite = false;
-        ghostMaterials.set(material, ghost);
-      }
-      return ghost;
-    };
     for (const list of batches.values()) {
       if (!list.length) continue;
       const source = list[0].source;
@@ -408,34 +339,19 @@ export class TownGame {
         list.length,
       );
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      mesh.castShadow = mesh.receiveShadow = true;
       mesh.frustumCulled = true;
       this.scene.add(mesh);
-      // A separate transparent batch keeps the rest of the town opaque and correctly depth-tested.
-      const ghost = new THREE.InstancedMesh(
-        source.geometry,
-        Array.isArray(source.material)
-          ? source.material.map(ghostMaterial)
-          : ghostMaterial(source.material),
-        list.length,
-      );
-      ghost.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      ghost.visible = false;
-      this.ghostMeshes.push(ghost);
-      this.scene.add(ghost);
       list.forEach(({ piece, scale }, index) => {
         const p = piece.body.translation(),
           q = piece.body.rotation();
         this.pieceVisuals.push({
           piece,
           mesh,
-          ghost,
           index,
           scale,
           prev: new THREE.Vector3(p.x, p.y, p.z),
           prevQ: new THREE.Quaternion(q.x, q.y, q.z, q.w),
           renderedState: '',
-          opacity: 1,
         });
       });
     }
@@ -445,21 +361,9 @@ export class TownGame {
   }
   updatePieceVisuals(alpha: number) {
     const changed = new Set<THREE.InstancedMesh>();
-    const visibleGhosts = new Set<THREE.InstancedMesh>();
     for (const v of this.pieceVisuals) {
       const p = v.piece;
-      const opacity =
-        p.state === 'intact' && this.occludedGroups.has(p.definition.group)
-          ? 0.12
-          : 1;
-      if (opacity < 1) visibleGhosts.add(v.ghost);
-      if (
-        p.state === v.renderedState &&
-        p.state !== 'debris' &&
-        opacity === v.opacity
-      )
-        continue;
-      v.opacity = opacity;
+      if (p.state === v.renderedState && p.state !== 'debris') continue;
       const position = p.body.translation(),
         rotation = p.body.rotation();
       this.temp.set(position.x, position.y, position.z);
@@ -487,24 +391,14 @@ export class TownGame {
       this.matrix.compose(
         this.temp,
         this.qtemp,
-        this.scaleTemp.copy(v.scale).multiplyScalar(opacity < 1 ? 0 : size),
+        this.scaleTemp.copy(v.scale).multiplyScalar(size),
       );
       v.mesh.setMatrixAt(v.index, this.matrix);
       v.mesh.instanceMatrix.needsUpdate = true;
-      this.matrix.compose(
-        this.temp,
-        this.qtemp,
-        this.scaleTemp.copy(v.scale).multiplyScalar(opacity < 1 ? size : 0),
-      );
-      v.ghost.setMatrixAt(v.index, this.matrix);
-      v.ghost.instanceMatrix.needsUpdate = true;
-      changed.add(v.ghost);
       changed.add(v.mesh);
       v.renderedState = p.state;
     }
     for (const mesh of changed) mesh.computeBoundingSphere();
-    for (const ghost of this.ghostMeshes)
-      ghost.visible = visibleGhosts.has(ghost);
   }
   addVisual(body: RAPIER.RigidBody, object: THREE.Object3D) {
     const p = body.translation(),
@@ -535,8 +429,7 @@ export class TownGame {
       camera: {
         yaw: this.orbit.yaw,
         pitch: this.orbit.pitch,
-        distance: this.cameraRadius,
-        fadedObstructions: this.occludedGroups.size,
+        distance: this.cameraBoom.distance,
       },
       renderer: {
         drawCalls: this.renderer.info.render.calls,
@@ -593,7 +486,6 @@ export class TownGame {
     this.accumulator = 0;
     this.previousJump = 0;
     this.previousImpact = 0;
-    this.resetCamera();
     for (const v of this.pieceVisuals) v.renderedState = '';
     this.updatePieceVisuals(1);
     for (const v of this.visuals) {
@@ -605,22 +497,15 @@ export class TownGame {
       v.object.quaternion.copy(v.prevQ);
       v.object.visible = true;
     }
+    this.resetCamera();
     this.report({ speed: 0, airborne: false, distance: 0, fps: 0, broken: 0 });
   }
   resetCamera() {
     if (!this.sim) return;
     this.cancelOrbit();
     this.orbit.reset();
-    this.cameraRadius = 17;
-    this.occludedGroups.clear();
-    const p = this.sim.ball.translation();
-    this.target.set(p.x, p.y + 1, p.z);
-    this.camera.position.set(
-      p.x,
-      this.target.y + Math.sin(this.orbit.pitch) * 17,
-      this.target.z - Math.cos(this.orbit.pitch) * 17,
-    );
-    this.camera.lookAt(this.target);
+    this.cameraBoom.reset();
+    this.updateCamera(0);
   }
   frame = (now: number) => {
     if (this.dead) return;
@@ -705,98 +590,36 @@ export class TownGame {
       v = this.sim.ball.linvel(),
       speed = Math.hypot(v.x, v.z);
     const { yaw, pitch } = this.orbit;
-    // Cast from above the ball itself; a look-ahead pivot can sit inside an intact wall.
-    this.target.set(p.x, p.y + 1, p.z);
+    // Keep the sweep's starting sphere inside the ball's collider, away from walls and ceilings.
+    this.target.set(p.x, p.y + 0.35, p.z);
     this.cameraDirection.set(
       -Math.sin(yaw) * Math.cos(pitch),
       Math.sin(pitch),
       -Math.cos(yaw) * Math.cos(pitch),
     );
     const distance = 17 + speed * 0.12;
-    for (const [group, time] of this.occludedGroups) {
-      if (time <= dt) this.occludedGroups.delete(group);
-      else this.occludedGroups.set(group, time - dt);
-    }
-    const excluded = new Set<string>();
-    let clearDistance = distance;
-    for (let i = 0; i < 8; i++) {
-      const hit = this.sim.world.castShape(
-        this.target,
-        { x: 0, y: 0, z: 0, w: 1 },
-        this.cameraDirection,
-        this.cameraProbe,
-        0.08,
-        distance,
-        true,
-        RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC,
-        undefined,
-        undefined,
-        undefined,
-        (collider) => {
-          const part = this.sim.breakableColliders.get(collider.handle);
-          return (
-            !part ||
-            !('definition' in part) ||
-            !excluded.has(part.definition.group)
-          );
-        },
-      );
-      if (!hit) break;
-      const part = this.sim.breakableColliders.get(hit.collider.handle);
-      if (hit.time_of_impact < 8 && part && 'definition' in part) {
-        // Make nearby obstructions a cutaway, preserving a useful view during destruction.
-        excluded.add(part.definition.group);
-        this.occludedGroups.set(part.definition.group, 0.22);
-      } else {
-        clearDistance = Math.max(0.5, hit.time_of_impact - 0.12);
-        break;
-      }
-    }
-    // Immediately move inward at an obstruction; ease back out when the path clears.
-    this.cameraRadius =
-      clearDistance < this.cameraRadius
-        ? clearDistance
-        : THREE.MathUtils.lerp(
-            this.cameraRadius,
-            clearDistance,
-            1 - Math.exp(-5 * dt),
-          );
+    const cameraRadius = this.cameraBoom.update(
+      this.sim.world,
+      this.target,
+      this.cameraDirection,
+      distance,
+      dt,
+    );
     this.camera.position
       .copy(this.target)
-      .addScaledVector(this.cameraDirection, this.cameraRadius);
+      .addScaledVector(this.cameraDirection, cameraRadius);
     this.camera.lookAt(this.target);
-    const fov = 52 + Math.min(7, speed * 0.25);
-    this.camera.fov = THREE.MathUtils.lerp(
-      this.camera.fov,
-      fov,
-      1 - Math.exp(-3 * dt),
+    const fov = cameraFov(
+      cameraRadius,
+      this.camera.aspect,
+      TUNING.radius,
+      52 + Math.min(7, speed * 0.25),
     );
+    this.camera.fov =
+      fov > this.camera.fov
+        ? fov
+        : THREE.MathUtils.lerp(this.camera.fov, fov, 1 - Math.exp(-3 * dt));
     this.camera.updateProjectionMatrix();
-    this.sun.position.set(p.x - 35, p.y + 60, p.z - 20);
-    this.sun.target.position.set(p.x, p.y, p.z);
-    if (this.ring) {
-      const hit = this.sim.world.castRayAndGetNormal(
-        new RAPIER.Ray({ x: p.x, y: p.y, z: p.z }, { x: 0, y: -1, z: 0 }),
-        12,
-        true,
-        undefined,
-        undefined,
-        undefined,
-        this.sim.ball,
-      );
-      if (hit) {
-        this.ring.visible = true;
-        this.ring.position.set(p.x, p.y - hit.timeOfImpact + 0.025, p.z);
-        this.ring.quaternion.setFromUnitVectors(
-          new THREE.Vector3(0, 0, 1),
-          new THREE.Vector3(hit.normal.x, hit.normal.y, hit.normal.z),
-        );
-        this.shadowMaterial!.opacity = Math.max(
-          0.15,
-          1 - (hit.timeOfImpact - 0.72) / 8,
-        );
-      } else this.ring.visible = false;
-    }
   }
   dispose() {
     if (this.dead) return;
@@ -841,7 +664,6 @@ export class TownGame {
     geometries.forEach((g) => g.dispose());
     materials.forEach((m) => m.dispose());
     textures.forEach((t) => t.dispose());
-    this.sun.shadow.map?.dispose();
     this.sim?.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();

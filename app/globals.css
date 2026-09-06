@@ -178,7 +178,6 @@ body {
   border: 1px solid #ffffff40;
   border-radius: 17px;
   background: #154578b3;
-  backdrop-filter: blur(12px);
 }
 .hud-button {
   width: 40px !important;
@@ -278,7 +277,6 @@ body {
   border: 1px solid #ffffff24;
   border-radius: 12px;
   background: #143f70ba;
-  backdrop-filter: blur(12px);
   padding: 12px 17px;
   font-size: 14px;
   color: #ffffffe6;
@@ -345,7 +343,6 @@ kbd {
   place-items: center;
   z-index: 6;
   background: #12396180;
-  backdrop-filter: blur(9px);
 }
 .pause-panel {
   display: flex;
@@ -407,7 +404,6 @@ kbd {
   border-radius: 50%;
   border: 1px solid #ffffff90;
   background: #fff9e7;
-  backdrop-filter: blur(4px);
   box-shadow: 0 3px 15px #153b3b25;
   pointer-events: none;
 }
@@ -427,7 +423,6 @@ kbd {
   border: 1px solid #ffffff7f;
   color: white;
   background: #2869a3e8;
-  backdrop-filter: blur(5px);
 }
 .touch-jump {
   width: 91px;

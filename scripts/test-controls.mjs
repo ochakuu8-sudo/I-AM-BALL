@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { OrbitInput, screenToWorld, CAMERA } from '../lib/town/controls.ts';
 import { TownSimulation } from '../lib/town/simulation.ts';
+import { CameraBoom, cameraFov } from '../lib/town/camera.ts';
 
 await RAPIER.init();
 const near = (a, b) => assert.ok(Math.abs(a - b) < 0.000001);
@@ -73,4 +74,91 @@ near(orbit.yaw, 0);
 near(orbit.pitch, CAMERA.pitch);
 console.log(
   'PASS separate pointer ownership, release, cancellation, vertical limits and camera reset.',
+);
+
+const cameraWorld = new RAPIER.World({ x: 0, y: 0, z: 0 });
+try {
+  const origin = { x: 0, y: 1.1, z: 0 };
+  const behind = {
+    x: 0,
+    y: Math.sin(CAMERA.pitch),
+    z: -Math.cos(CAMERA.pitch),
+  };
+  const wall = cameraWorld.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+  cameraWorld.createCollider(
+    RAPIER.ColliderDesc.cuboid(5, 8, 0.2).setTranslation(0, 4, -4),
+    wall,
+  );
+  cameraWorld.step();
+  const camera = new CameraBoom();
+  const close = camera.update(cameraWorld, origin, behind, 17, 1 / 60);
+  assert.ok(
+    close > 3 && close < 4,
+    'A nearby wall must pull the camera in immediately',
+  );
+  const center = {
+    x: origin.x + behind.x * close,
+    y: origin.y + behind.y * close,
+    z: origin.z + behind.z * close,
+  };
+  assert.equal(
+    cameraWorld.intersectionWithShape(
+      center,
+      { x: 0, y: 0, z: 0, w: 1 },
+      camera.probe,
+    ),
+    null,
+    'Camera must stay outside the wall',
+  );
+
+  // A destroyed wall becomes a moving fragment; the camera must stop treating it as an obstruction.
+  wall.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
+  cameraWorld.step();
+  const returning = camera.update(cameraWorld, origin, behind, 17, 1 / 60);
+  assert.ok(
+    returning > close && returning < 17,
+    'Return after destruction must be smooth',
+  );
+  camera.reset();
+  near(camera.update(cameraWorld, origin, behind, 17, 1 / 60), 17);
+
+  // Returning to a solid wall after a fast swipe must never ease through it.
+  wall.setBodyType(RAPIER.RigidBodyType.Fixed, true);
+  cameraWorld.step();
+  assert.ok(camera.update(cameraWorld, origin, behind, 17, 1 / 144) < 4);
+  camera.reset();
+  near(camera.update(cameraWorld, origin, { x: 1, y: 0, z: 0 }, 17, 0), 17);
+  assert.ok(
+    camera.update(cameraWorld, origin, behind, 17, 0) < 4,
+    'Reset must respect walls even while paused',
+  );
+
+  wall.setEnabled(false);
+  cameraWorld.step();
+  const finalDistances = [30, 60, 144].map((rate) => {
+    const boom = new CameraBoom();
+    boom.distance = close;
+    for (let i = 0; i < rate; i++)
+      boom.update(cameraWorld, origin, behind, 17, 1 / rate);
+    return boom.distance;
+  });
+  for (const distance of finalDistances) near(distance, finalDistances[0]);
+  console.log(
+    'PASS camera wall clearance, fast orbit, paused reset, ignored flying debris and frame-independent return.',
+  );
+} finally {
+  cameraWorld.free();
+}
+
+const portraitAspect = 390 / 740;
+const closeFov = cameraFov(2, portraitAspect, 0.72, 52);
+const projectedBallWidth =
+  0.72 / (2 * Math.tan((closeFov * Math.PI) / 360) * portraitAspect);
+assert.ok(
+  projectedBallWidth < 0.75,
+  'Close portrait view must leave space around the ball',
+);
+near(cameraFov(17, portraitAspect, 0.72, 52), 52);
+console.log(
+  'PASS close portrait framing keeps the ball within the screen without changing the open-street view.',
 );
