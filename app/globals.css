@@ -61,6 +61,58 @@ body {
   width: 100%;
   height: 100%;
   outline: none;
+  touch-action: none;
+}
+.destruction-counter {
+  position: absolute;
+  right: max(30px, env(safe-area-inset-right));
+  top: 104px;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0 10px;
+  align-items: center;
+  padding: 10px 14px;
+  border: 1px solid #ffffff50;
+  border-radius: 14px;
+  background: #154578cf;
+  pointer-events: none;
+}
+.destruction-counter > span {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+.destruction-counter strong {
+  color: #ffd429;
+  font-size: 28px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  animation: smash-count 0.22s ease-out;
+}
+.destruction-counter small {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  opacity: 0.85;
+  margin-top: 5px;
+}
+.orbit-hint {
+  position: absolute;
+  right: 30px;
+  bottom: 143px;
+  z-index: 2;
+  font-size: 11px;
+  text-shadow: 0 1px 5px #12395d;
+  pointer-events: none;
+  opacity: 0.85;
+}
+@keyframes smash-count {
+  from {
+    transform: scale(1.24);
+  }
+  to {
+    transform: scale(1);
+  }
 }
 .hud-top {
   position: absolute;
@@ -416,6 +468,10 @@ kbd {
   }
 }
 @media (pointer: coarse), (max-width: 900px) {
+  .destruction-counter {
+    right: 20px;
+    top: 114px;
+  }
   .touch-controls {
     display: flex;
   }
@@ -458,7 +514,47 @@ kbd {
     padding: 8px !important;
   }
 }
+@media (max-width: 420px) {
+  .identity-symbol {
+    display: none;
+  }
+  .hud-top {
+    gap: 8px;
+    left: 16px;
+    right: 16px;
+  }
+  .identity h1 {
+    font-size: 13px;
+  }
+  .hud-button {
+    width: 34px !important;
+    min-width: 34px !important;
+  }
+  .touch-controls {
+    left: 18px;
+    right: 18px;
+  }
+  .touch-actions {
+    gap: 12px;
+  }
+  .orbit-hint {
+    right: 20px;
+    bottom: 153px;
+    font-size: 10px;
+  }
+}
 @media (max-height: 520px) {
+  .destruction-counter {
+    top: 84px;
+    right: 24px;
+  }
+  .destruction-counter small {
+    display: none;
+  }
+  .orbit-hint {
+    bottom: 127px;
+    right: 24px;
+  }
   .speedometer {
     bottom: 25px;
     left: 180px;
@@ -491,6 +587,9 @@ kbd {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .destruction-counter strong {
+    animation: none;
+  }
   .loading-line {
     animation: none;
   }

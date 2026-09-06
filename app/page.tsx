@@ -7,6 +7,7 @@ import {
   Volume2,
   VolumeX,
   ArrowUpRight,
+  Focus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { TownGame, GameStats } from '@/lib/town/game';
@@ -14,6 +15,8 @@ import type { TownGame, GameStats } from '@/lib/town/game';
 export default function Home() {
   const host = useRef<HTMLDivElement>(null),
     game = useRef<TownGame | null>(null);
+  const stickPointer = useRef<number | null>(null);
+  const brakePointer = useRef<number | null>(null);
   const [ready, setReady] = useState(false),
     [error, setError] = useState(''),
     [paused, setPaused] = useState(false),
@@ -23,6 +26,7 @@ export default function Home() {
     airborne: false,
     distance: 0,
     fps: 60,
+    broken: 0,
   });
   const [knob, setKnob] = useState({ x: 0, y: 0 });
   useEffect(() => {
@@ -30,7 +34,13 @@ export default function Home() {
     import('@/lib/town/game')
       .then(async ({ TownGame }) => {
         if (dead || !host.current) return;
-        const g = new TownGame(host.current, setStats, setPaused);
+        const g = new TownGame(host.current, setStats, (value) => {
+          setPaused(value);
+          if (value) {
+            stickPointer.current = brakePointer.current = null;
+            setKnob({ x: 0, y: 0 });
+          }
+        });
         game.current = g;
         try {
           await g.init();
@@ -49,7 +59,7 @@ export default function Home() {
     };
   }, []);
   function stick(e: React.PointerEvent<HTMLDivElement>) {
-    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    if (paused || stickPointer.current !== e.pointerId) return;
     const r = e.currentTarget.getBoundingClientRect(),
       x = e.clientX - r.left - r.width / 2,
       y = e.clientY - r.top - r.height / 2,
@@ -58,9 +68,20 @@ export default function Home() {
     setKnob({ x: x * k, y: y * k });
     game.current?.setTouch((x * k) / 43, (-y * k) / 43);
   }
-  function release() {
+  function release(e: React.PointerEvent<HTMLDivElement>) {
+    if (stickPointer.current !== e.pointerId) return;
+    stickPointer.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId))
+      e.currentTarget.releasePointerCapture(e.pointerId);
     setKnob({ x: 0, y: 0 });
     game.current?.setTouch(0, 0);
+  }
+  function releaseBrake(e: React.PointerEvent<HTMLButtonElement>) {
+    if (brakePointer.current !== e.pointerId) return;
+    brakePointer.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId))
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    game.current?.setBrake(false);
   }
   return (
     <main className="game-shell">
@@ -68,7 +89,7 @@ export default function Home() {
         ref={host}
         className="world"
         role="application"
-        aria-label="ボールで走る3Dの住宅街。WASDで移動、スペースでジャンプ。"
+        aria-label="ボールで壊せる3Dの住宅街。WASDで移動、スペースでジャンプ、画面をドラッグして視点を回転。"
       />
       <header className="hud-top">
         <div className="identity">
@@ -78,11 +99,20 @@ export default function Home() {
           <div>
             <h1>ROLLING TOWN</h1>
             <p>
-              坂道の街 <span className="version">/ FREE ROAM</span>
+              坂道の街 <span className="version">/ SMASH & ROLL</span>
             </p>
           </div>
         </div>
         <div className="toolbar">
+          <Button
+            className="hud-button"
+            variant="ghost"
+            aria-label="視点を正面に戻す"
+            title="視点を正面に戻す (C)"
+            onClick={() => game.current?.resetCamera()}
+          >
+            <Focus />
+          </Button>
           <Button
             className="hud-button"
             variant="ghost"
@@ -120,6 +150,17 @@ export default function Home() {
           <div className="location">
             <i /> HILLSIDE DISTRICT <span>01</span>
           </div>
+          <div
+            className="destruction-counter"
+            aria-label={`破壊したパーツ ${stats.broken}`}
+          >
+            <span>SMASHED</span>
+            <strong key={stats.broken}>
+              {stats.broken.toString().padStart(3, '0')}
+            </strong>
+            <small>ぶつかって街を壊そう</small>
+          </div>
+          <div className="orbit-hint">画面をスライドして視点を回転</div>
           <div className="speedometer">
             <div className="speed-value">
               {Math.round(stats.speed).toString().padStart(2, '0')}
@@ -137,7 +178,7 @@ export default function Home() {
                 ? 'AIR TIME'
                 : stats.speed > 65
                   ? 'KEEP ROLLING'
-                  : 'FIND YOUR FLOW'}
+                  : 'LET’S SMASH'}
               <span>{Math.floor(stats.distance)} m</span>
             </p>
           </div>
@@ -152,6 +193,9 @@ export default function Home() {
               <kbd>SHIFT</kbd> ブレーキ
             </span>
             <span>
+              <kbd>ドラッグ</kbd> 視点
+            </span>
+            <span>
               <kbd>R</kbd> 戻る
             </span>
           </div>
@@ -161,6 +205,9 @@ export default function Home() {
               role="application"
               aria-label="移動スティック"
               onPointerDown={(e) => {
+                if (paused || stickPointer.current !== null) return;
+                e.preventDefault();
+                stickPointer.current = e.pointerId;
                 e.currentTarget.setPointerCapture(e.pointerId);
                 stick(e);
               }}
@@ -181,12 +228,15 @@ export default function Home() {
                 className="touch-brake"
                 aria-label="ブレーキ"
                 onPointerDown={(e) => {
+                  if (paused || brakePointer.current !== null) return;
+                  e.preventDefault();
+                  brakePointer.current = e.pointerId;
                   e.currentTarget.setPointerCapture(e.pointerId);
                   game.current?.setBrake(true);
                 }}
-                onPointerUp={() => game.current?.setBrake(false)}
-                onPointerCancel={() => game.current?.setBrake(false)}
-                onLostPointerCapture={() => game.current?.setBrake(false)}
+                onPointerUp={releaseBrake}
+                onPointerCancel={releaseBrake}
+                onLostPointerCapture={releaseBrake}
               >
                 BRAKE
               </button>
@@ -227,7 +277,11 @@ export default function Home() {
             >
               <Play /> 街に戻る
             </Button>
-            <span>WASD / 方向キーで移動 · Spaceでジャンプ</span>
+            <span>
+              WASD / 方向キーで移動 · Spaceでジャンプ
+              <br />
+              画面をドラッグして視点を回転 · Cで視点を戻す
+            </span>
           </div>
         </div>
       )}

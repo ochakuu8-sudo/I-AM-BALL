@@ -5,11 +5,11 @@
     {
       "test": "Downhill ground contact stays stable for ten seconds",
       "status": "pass",
-      "minimumClearance": 0.716,
+      "minimumClearance": 0.718,
       "position": {
-        "x": -0.102118581533432,
-        "y": 0.7189887166023254,
-        "z": 7.745563983917236
+        "x": -0.9461289644241333,
+        "y": 0.7197645306587219,
+        "z": -4.7322468757629395
       }
     },
     {
@@ -30,14 +30,37 @@
       "jumps": 1
     },
     {
-      "test": "Ball cannot tunnel through a house at high speed",
+      "test": "A fast ball breaches separate facade panels",
       "status": "pass",
-      "minimumX": -12.137147903442383
+      "brokenPanels": 6,
+      "remainingPanels": 42,
+      "ballX": -13.71066665649414
     },
     {
-      "test": "Movable crate is pushed by the ball",
+      "test": "A gentle bump moves a crate without shattering it",
       "status": "pass",
-      "crateTravel": 5.4322148506332075
+      "crateTravel": 0.5468544377272805
+    },
+    {
+      "test": "A fast crate impact produces separate moving planks",
+      "status": "pass",
+      "planks": 6
+    },
+    {
+      "test": "Unbroken walls stop a low-speed push",
+      "status": "pass",
+      "ballX": -10.638349533081055
+    },
+    {
+      "test": "Losing supporting walls collapses upper storeys and the roof",
+      "status": "pass",
+      "collapsedParts": 48
+    },
+    {
+      "test": "Debris stays within its budget, expires, and reset restores every part",
+      "status": "pass",
+      "restoredParts": 1129,
+      "maxDebris": 80
     },
     {
       "test": "Street ramp sends a rolling ball into the air",
@@ -47,7 +70,7 @@
     {
       "test": "Reset restores ball, counters, and movable props",
       "status": "pass",
-      "propsRestored": 15
+      "propsRestored": 16
     },
     {
       "test": "30, 60, and 144 Hz render schedules produce the same physics",
@@ -58,9 +81,9 @@
         144
       ],
       "position": {
-        "x": 17.733312606811523,
-        "y": 0.6847118735313416,
-        "z": 67.10023498535156
+        "x": 19.58652114868164,
+        "y": 2.0127623081207275,
+        "z": 47.159366607666016
       }
     }
   ]

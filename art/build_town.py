@@ -1,9 +1,11 @@
 """Build original game-ready houses and a neighborhood in Blender. Run with blender -b -P art/build_town.py."""
-import bpy, math, random, json, os
+import bpy, math, random, json, os, sys
 from mathutils import Vector, Matrix
 from pathlib import Path
 random.seed(42)
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT/'art'))
+from destruction import chunk, house_chunks, register
 OUT=ROOT/'public'/'models'
 ART=ROOT/'art'
 OUT.mkdir(parents=True,exist_ok=True); ART.mkdir(parents=True,exist_ok=True)
@@ -93,26 +95,42 @@ def pot(x,y,z,flowers=False):
 def house(style=0):
     before=set(bpy.context.scene.objects);wall=['plaster','plaster_blue','plaster_rose'][style]
     roof='roof_rust' if style==2 else 'roof';rl='roof_rust_light' if style==2 else 'roof_light'
-    box('Raised_masonry_foundation',(0,.0,0),(8,.7,6.7),'stone',.045)
-    box('Ground_storey',(0,1.5,0),(7.6,2.6,6.2),wall,.025)
-    box('Upper_storey',(0,4.05,0),(7.6,2.5,6.2),wall,.025)
-    box('Floor_trim',(0,2.7,0),(7.75,.17,6.35),'trim')
+    for i,(x,z) in enumerate([(-2,-1.675),(2,-1.675),(-2,1.675),(2,1.675)]):
+        o=box('Raised_masonry_foundation',(x,0,z),(3.98,.7,3.33),'stone',.045)
+        o['chunk']='foundation_%d'%i
+    # Hollow storeys made of individual facade panels, rather than solid blocks.
+    for level,y in [(0,1.5),(1,4.05)]:
+        for i in range(4):
+            for side,z in [('front',3.0),('back',-3.0)]:
+                o=box('Wall',( -2.85+i*1.9,y,z),(1.88,2.55,.24),wall,.025)
+                o['chunk']='wall_%d_%s_%d'%(level,side,i)
+                t=box('Floor_trim',(-2.85+i*1.9,y+1.21,z),(1.89,.15,.35),'trim')
+                t['chunk']=o['chunk']
+            for side,x in [('left',-3.68),('right',3.68)]:
+                o=box('Wall',(x,y,-2.325+i*1.55),(.24,2.55,1.53),wall,.025)
+                o['chunk']='wall_%d_%s_%d'%(level,side,i)
+                t=box('Floor_trim',(x,y+1.21,-2.325+i*1.55),(.35,.15,1.54),'trim')
+                t['chunk']=o['chunk']
+    for i,(x,z) in enumerate([(-1.8,-1.45),(1.8,-1.45),(-1.8,1.45),(1.8,1.45)]):
+        o=box('Upper_floor',(x,2.8,z),(3.58,.16,2.88),'wood')
+        o['chunk']='floor_%d'%i
     # Gables are modelled solids, and roof has thickness and visible individual courses.
     for z in [-3.1,3.1]:
         mesh('Gable',[(-3.8,5.3,z),(3.8,5.3,z),(0,7.15,z)],[(0,1,2)],wall)
     for side in [-1,1]:
-        verts=[(0,7.22,-3.65),(side*4.3,5.2,-3.65),(side*4.3,5.2,3.65),(0,7.22,3.65),(0,7.07,-3.65),(side*4.3,5.05,-3.65),(side*4.3,5.05,3.65),(0,7.07,3.65)]
-        mesh('Thick_pitched_roof',verts,[(0,3,2,1),(4,5,6,7),(0,1,5,4),(1,2,6,5),(2,3,7,6),(3,0,4,7)],roof)
+        for za,zb in [(-3.65,0),(0,3.65)]:
+            verts=[(0,7.22,za),(side*4.3,5.2,za),(side*4.3,5.2,zb),(0,7.22,zb),(0,7.07,za),(side*4.3,5.05,za),(side*4.3,5.05,zb),(0,7.07,zb)]
+            mesh('Thick_pitched_roof',verts,[(0,3,2,1),(4,5,6,7),(0,1,5,4),(1,2,6,5),(2,3,7,6),(3,0,4,7)],roof)
         for i in range(1,12):
             x=side*i*4.3/12;y=7.24-abs(x)*2.02/4.3
-            beam('Roof_tile_course',(x,y,-3.68),(x,y,3.68),.032,rl)
+            for za,zb in [(-3.68,0),(0,3.68)]:beam('Roof_tile_course',(x,y,za),(x,y,zb),.032,rl)
         for j in range(14):
             z=-3.5+j*.53
             beam('Roof_tile_seam',(side*.10,7.25,z),(side*4.29,5.28,z),.017,rl)
         for z in [-3.7,3.7]:beam('Gable_fascia',(0,7.17,z),(side*4.35,5.14,z),.065,'trim')
-        beam('Rain_gutter',(side*4.30,5.15,-3.65),(side*4.30,5.15,3.65),.085,'metal')
+        for za,zb in [(-3.65,0),(0,3.65)]:beam('Rain_gutter',(side*4.30,5.15,za),(side*4.30,5.15,zb),.085,'metal')
         beam('Downpipe',(side*3.87,.25,2.9),(side*3.87,5.1,2.9),.06,'metal')
-    beam('Ridge_cap',(0,7.25,-3.75),(0,7.25,3.75),.09,rl)
+    for za,zb in [(-3.75,0),(0,3.75)]:beam('Ridge_cap',(0,7.25,za),(0,7.25,zb),.09,rl)
     box('Chimney',(-2,6.8,-1.8),(.65,1.8,.65),'stone',.04)
     box('Chimney_cap',(-2,7.75,-1.8),(.85,.15,.85),'trim')
     for x in [-2.05,2.05]:window(x,3.95,3.16,1.55,1.45)
@@ -127,7 +145,7 @@ def house(style=0):
     beam('Door_handle',(2.27,.90,3.34),(2.27,1.15,3.34),.035,'yellow')
     for i in range(3):box('Entrance_step',(1.85,.10+i*.09,3.9-i*.24),(2.0,.18,1.1-i*.22),'stone',.025)
     # Usable-looking balcony with deck slats, brackets and narrow railings.
-    box('Balcony_floor',(0,2.78,3.8),(6.7,.18,1.45),'wood',.025)
+    for i in range(4):box('Balcony_floor',(-2.51+i*1.67,2.78,3.8),(1.65,.18,1.45),'wood',.025)
     for x in [-3.24,3.24]:
         beam('Balcony_support',(x,1.95,3.13),(x,2.70,4.38),.065,'metal')
         beam('Balcony_side_rail',(x,3.70,3.15),(x,3.70,4.42),.04,'trim')
@@ -135,7 +153,7 @@ def house(style=0):
         x=-3.2+i*6.4/24
         box('Deck_board',(x,2.89,3.8),(.22,.035,1.36),'wood')
         beam('Balcony_baluster',(x,2.9,4.42),(x,3.70,4.42),.025,'metal')
-    beam('Balcony_top_rail',(-3.30,3.72,4.42),(3.30,3.72,4.42),.055,'trim')
+    for i in range(4):beam('Balcony_top_rail',(-3.30+i*1.65,3.72,4.42),(-1.65+i*1.65,3.72,4.42),.055,'trim')
     box('Porch_roof',(1.85,2.50,3.95),(2.7,.15,1.85),roof,.04)
     for x in [.65,3.05]:box('Porch_post',(x,1.28,4.65),(.11,2.4,.11),'trim')
     box('Address_plaque',(2.91,1.77,3.2),(.28,.18,.06),'trim')
@@ -143,7 +161,7 @@ def house(style=0):
     box('Flower_box',(-1.9,.6,3.55),(2.0,.33,.45),'wood',.025)
     for i in range(6):pot(-2.7+i*.32,.65,3.55,True)
     pot(-3.1,.35,4.3);pot(2.7,2.9,3.9,True)
-    return merge(since(before),'House_'+str(style))
+    return house_chunks(since(before),style)
 def export(objects,path):
     bpy.ops.object.select_all(action='DESELECT')
     for o in objects:o.select_set(True)
@@ -168,7 +186,12 @@ bpy.context.scene.render.filepath=str(ART/'hillside-house.png');bpy.ops.render.r
 for o in studio+[ground]:bpy.data.objects.remove(o,do_unlink=True)
 templates=[hero,house(1),house(2)]
 # Hide templates by moving them; town copies keep shared mesh data until the final merge.
-alltown=[];colliders=[];prop_spawns=[]
+alltown=[];colliders=[];prop_spawns=[];breakable_meshes=[];pieces=[]
+def break_parts(objects,group,kind,grouping=None):
+    buckets={}
+    for i,o in enumerate(objects):buckets.setdefault(grouping(o) if grouping else str(i),[]).append(o)
+    parts=[chunk(items,group+'_'+key,kind) for key,items in buckets.items()]
+    register(parts,group,pieces,breakable_meshes)
 def H(z):return max(0,min(7,(-z-10)*.18))
 def terrain_rect(name,x0,x1,z0,z1,material,offset=.0):
     zs=sorted(set([z0,z1]+[z for z in [-49,-10] if z0<z<z1]))
@@ -199,19 +222,21 @@ for idx,(x,z,yaw,style) in enumerate(lots):
     y=H(z)+.38
     copies=[]
     for src in templates[style]:
-        o=bpy.data.objects.new('Residence_%02d_'%idx+src.name,src.data);bpy.context.collection.objects.link(o);copies.append(o)
-    tx(copies,x,y,z,yaw);alltown+=copies
-    colliders.append({'kind':'box','position':[x,y+2.7,z],'half':[3.15,2.95,3.8]})
+        o=src.copy();o.data=src.data;o.name='Residence_%02d_'%idx+src.name;bpy.context.collection.objects.link(o);copies.append(o)
+    tx(copies,x,y,z,yaw)
+    register(copies,'house_%02d'%idx,pieces,breakable_meshes)
     allbefore=set(bpy.context.scene.objects)
-    box('Lot_foundation',(x,y-.7,z),(10,1.5,11.3),'stone',.05)
+    terrain_rect('Lot_paving',x-5,x+5,z-5.65,z+5.65,'stone',.08)
     terrain_rect('Garden_lawn',x-5.6,x+5.6,z-6.5,z+6.5,'grass_dark',.09)
     # Garden access stays open toward the street.
     for sign in [-1,1]:
         for i in range(5):
             px=x-4.5+i*2.2;pz=z+sign*6.0
-            ico('Hedge',(px,H(pz)+.62,pz),(1.25,.62,.58),'leaf_light',1)
-    for sign in [-1,1]:pot(x+sign*4.5,H(z+4.4)+.1,z+4.4,True)
-    alltown+=since(allbefore)
+            hedge=ico('Hedge',(px,H(pz)+.62,pz),(1.25,.62,.58),'leaf_light',1)
+            break_parts([hedge],'hedge_%d_%d_%d'%(idx,sign,i),'hedge')
+    for sign in [-1,1]:
+        before=set(bpy.context.scene.objects);pot(x+sign*4.5,H(z+4.4)+.1,z+4.4,True)
+        break_parts(since(before),'pot_%d_%d'%(idx,sign),'pot',lambda o:'plant' if o.name.startswith(('Plant','Flowers')) else 'pot')
 # Remove unused templates.
 for group in templates:
     for o in group:bpy.data.objects.remove(o,do_unlink=True)
@@ -220,18 +245,22 @@ def tree(x,z,scale=1):
     cyl('Tree_trunk',(x,y+1.5*scale,z),.18*scale,3*scale,'trunk')
     for dx,dy,dz,s,material in [(0,3.3,0,1.45,'leaf'),(-.85,3.1,.3,1.1,'leaf_light'),(.75,3.5,-.1,1.2,'leaf_light'),(.1,4.25,.1,1.1,'leaf_bright')]:
         ico('Canopy',(x+dx*scale,y+dy*scale,z+dz*scale),(s*scale,s*scale,s*scale),material,2)
-    alltown.extend(since(before));colliders.append({'kind':'box','position':[x,y+1.2,z],'half':[.2,1.3,.2]})
+    break_parts(since(before),'tree_%d_%d'%(x,z),'tree')
 for x,z,s in [(-28,-44,1.1),(-28,5,1.0),(-28,45,1.2),(22,-45,.9),(22,7,.85),(21,48,1.0),(42,7,1.2),(57,48,1.2),(-48,-20,1.5),(-45,19,1.4),(-43,40,1.1),(54,-53,1.3),(13,-58,1.0),(39,-58,1.1),(-12,55,1.0),(11,57,1.0),(-37,-57,1.4)]:
     tree(x,z,s)
 # A small park and landmark water tower visible beyond the descending street.
 before=set(bpy.context.scene.objects)
 cyl('Plaza_paving',(0,H(44)+.06,44),7.1,.12,'walk',48)
+alltown+=since(before)
 for a in [0,math.pi/2,math.pi,math.pi*1.5]:
+    before=set(bpy.context.scene.objects)
     x=math.cos(a)*5;z=44+math.sin(a)*5
     box('Park_bench_seat',(x,.60,z),(2.5,.14,.60),'wood',.035,rot=a)
     box('Park_bench_back',(x,.99,z+.28),(2.5,.55,.10),'wood',.025,rot=a)
     for dx in [-.9,.9]:box('Bench_leg',(x+dx,.30,z),(.10,.60,.42),'metal')
+    break_parts(since(before),'bench_%d'%int(a*10),'bench')
 # Water tower on the corner, built as geometry rather than a background image.
+before=set(bpy.context.scene.objects)
 for x in [-2.4,2.4]:
     for z in [-2.4,2.4]:
         beam('Tower_leg',(49+x,0,58+z),(49+x*.8,10.3,58+z*.8),.16,'trim')
@@ -240,25 +269,25 @@ beam('Tower_brace',(51.4,1,55.6),(46.6,9.5,55.6),.07,'metal')
 cyl('Water_tank',(49,11.2,58),3.3,3.5,'plaster_white',32)
 for y in [9.55,12.85]:cyl('Tank_band',(49,y,58),3.36,.14,'blue',32)
 cyl('Tank_roof',(49,13.3,58),3.6,1.0,'roof',32,0)
-alltown+=since(before)
+break_parts(since(before),'tower','tower')
 # Street lamps, utility poles, rubbish bins and parking markings establish scale.
 for x,z in [(-7.6,-40),(-7.6,-12),(-7.6,30),(24.8,-26),(24.8,26),(38.8,40)]:
     before=set(bpy.context.scene.objects);y=H(z)
     cyl('Lamp_post',(x,y+2.7,z),.085,5.4,'metal')
     beam('Lamp_arm',(x,y+5.4,z),(x+1.35,y+5.6,z),.075,'metal')
     box('Lamp_head',(x+1.35,y+5.55,z),(.7,.16,.34),'trim',.06)
-    alltown+=since(before)
+    break_parts(since(before),'lamp_%d_%d'%(x,z),'lamp')
 for x,z in [(-8.7,-23),(23,-6),(38,16),(-8.7,14)]:
     before=set(bpy.context.scene.objects);y=H(z)
     box('Waste_bin',(x,y+.55,z),(.65,1.05,.62),'door',.08)
     box('Waste_bin_lid',(x,y+1.12,z),(.75,.12,.72),'metal',.06)
-    alltown+=since(before)
+    break_parts(since(before),'bin_%d_%d'%(x,z),'bin')
 # Small physical street props loaded separately at runtime.
-for x,z in [(-3,-22),(3,-19),(-2,15),(2,18),(29,21),(33,24),(-3,26),(4,28),(12,6)]:
+for x,z in [(0,-29),(-3,-22),(3,-19),(-2,15),(2,18),(29,21),(33,24),(-3,26),(4,28),(12,6)]:
     prop_spawns.append({'type':'crate','position':[x,H(z)+.55,z]})
 for x,z in [(-5,-8),(5,-7),(28,-7),(35,-7),(-4,21),(4,21)]:
     prop_spawns.append({'type':'cone','position':[x,H(z)+.45,z]})
-# Cars are static scenic objects with collision; the current test focuses on rolling.
+# Car bodywork, windows and wheels separate on impact.
 for x,z,color,yaw in [(4.6,-29,'red',0),(28.1,-20,'blue',0),(34.4,30,'yellow',0),(-25,7,'blue',math.pi/2)]:
     before=set(bpy.context.scene.objects);y=H(z)+.18
     box('Car_lower',(0,.6,0),(1.9,.55,3.6),color,.16)
@@ -273,8 +302,8 @@ for x,z,color,yaw in [(4.6,-29,'red',0),(28.1,-20,'blue',0),(34.4,30,'yellow',0)
         box('Headlight',(side*.65,.65,1.82),(.38,.18,.07),'white')
         box('Taillight',(side*.65,.65,-1.82),(.3,.15,.07),'red')
     box('Car_bumper',(0,.4,1.82),(1.7,.14,.12),'trim')
-    parts=since(before);tx(parts,x,y,z,yaw);alltown+=parts
-    colliders.append({'kind':'box','position':[x,y+.65,z],'half':[1 if yaw==0 else 1.85,.85,1.85 if yaw==0 else 1]})
+    parts=since(before);tx(parts,x,y,z,yaw)
+    break_parts(parts,'car_%d_%d'%(x,z),'car',lambda o: o.name.split('.')[0] if not o.name.startswith(('Tyre','Wheel_hub')) else o.name)
 # Broad ramp off the boulevard, approachable directly from the slope.
 rampverts=[(-2.6,.06,20),(2.6,.06,20),(2.6,1.7,26),(-2.6,1.7,26),(-2.6,.02,26),(2.6,.02,26)]
 rampfaces=[(0,1,2,3),(0,3,4),(1,5,2),(3,2,5,4)]
@@ -292,8 +321,8 @@ alltown+=since(before)
 # Deduplicate references from helper functions before joining.
 alltown=list(dict.fromkeys(alltown))
 merged=merge(alltown,'Town')
-export(merged,OUT/'town.glb')
-(OUT/'colliders.json').write_text(json.dumps({'colliders':colliders,'props':prop_spawns,'houseCount':len(lots)},separators=(',',':')))
+export(merged+breakable_meshes,OUT/'town.glb')
+(OUT/'colliders.json').write_text(json.dumps({'colliders':colliders,'pieces':pieces,'props':prop_spawns,'houseCount':len(lots)},separators=(',',':')))
 # Export a dynamic wooden crate and traffic cone.
 before=set(bpy.context.scene.objects)
 box('Crate',(0,0,0),(1,1,1),'wood',.04)
@@ -313,7 +342,7 @@ bpy.context.scene.render.resolution_x=1400;bpy.context.scene.render.resolution_y
 bpy.context.scene.render.filepath=str(ART/'town-overview.png')
 bpy.ops.wm.save_as_mainfile(filepath=str(ART/'rolling-town.blend'))
 bpy.ops.render.render(write_still=True)
-triangles=sum(len(o.data.polygons) for o in merged)
-(ART/'asset-report.json').write_text(json.dumps({'houses':len(lots),'mergedMeshes':len(merged),'polygons':triangles,'files':{f.name:f.stat().st_size for f in OUT.glob('*')}},indent=2))
+triangles=sum(len(o.data.polygons) for o in merged+breakable_meshes)
+(ART/'asset-report.json').write_text(json.dumps({'houses':len(lots),'staticMeshes':len(merged),'destructiblePieces':len(pieces),'uniquePieceMeshes':len(set(o.data for o in breakable_meshes)),'polygons':triangles,'files':{f.name:f.stat().st_size for f in OUT.glob('*')}},indent=2))
 print('TOWN_ASSETS_COMPLETE',triangles,len(merged))
 

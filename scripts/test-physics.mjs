@@ -5,6 +5,7 @@ import {
   TownSimulation,
   TUNING,
   groundHeight,
+  DESTRUCTION,
 } from '../lib/town/simulation.ts';
 
 await RAPIER.init();
@@ -95,28 +96,125 @@ test('Buffered jump fires just after landing', (sim) => {
   assert.ok(sim.ball.linvel().y > 0);
   return { jumps: sim.jumps };
 });
-test('Ball cannot tunnel through a house at high speed', (sim) => {
+test('A fast ball breaches separate facade panels', (sim) => {
   place(sim, -5, groundHeight(-33) + 0.74, -33, -32, 0, 0);
-  let closest = 0;
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < 24; i++) {
     sim.step(-1, 0);
-    closest = Math.min(closest, sim.ball.translation().x);
   }
-  assert.ok(closest > -12.25, `Ball entered the house: ${closest}`);
-  return { minimumX: closest };
+  const house = sim.groups.get('house_00');
+  const broken = house.filter((p) => p.state !== 'intact').length;
+  assert.ok(broken > 0, 'Impact did not break the facade');
+  assert.ok(
+    broken < house.length / 2,
+    'A single strike deleted the entire house',
+  );
+  assert.ok(
+    sim.ball.translation().x < -12.25,
+    'An invisible wall remained after the breach',
+  );
+  assert.ok(
+    sim.debris.some(
+      (p) =>
+        Math.hypot(p.body.linvel().x, p.body.linvel().y, p.body.linvel().z) > 1,
+    ),
+  );
+  return {
+    brokenPanels: broken,
+    remainingPanels: house.length - broken,
+    ballX: sim.ball.translation().x,
+  };
 });
-test('Movable crate is pushed by the ball', (sim) => {
+test('A gentle bump moves a crate without shattering it', (sim) => {
   const crate = sim.props.find((p) => p.type === 'crate' && p.spawn[0] === 29);
   assert.ok(crate);
   tick(sim, 30);
   const before = crate.body.translation();
-  place(sim, 29, 0.74, 17, 0, 0, 18);
-  tick(sim, 25, 0, 1);
+  place(sim, 29, 0.74, 19.5, 0, 0, 1.5);
+  tick(sim, 55);
   const after = crate.body.translation(),
     moved = Math.hypot(after.x - before.x, after.z - before.z);
-  assert.ok(moved > 1, `Crate did not move: ${moved}`);
+  assert.ok(moved > 0.02, 'Crate did not move');
+  assert.equal(crate.broken, false);
   return { crateTravel: moved };
 });
+test('A fast crate impact produces separate moving planks', (sim) => {
+  const crate = sim.props.find((p) => p.type === 'crate' && p.spawn[0] === 29);
+  tick(sim, 30);
+  place(sim, 29, 0.74, 17, 0, 0, 18);
+  tick(sim, 24, 0, 1);
+  assert.equal(crate.broken, true);
+  assert.equal(crate.body.isEnabled(), false);
+  assert.ok(crate.fragments.every((p) => p.state === 'debris'));
+  assert.ok(
+    new Set(crate.fragments.map((p) => p.body.translation().x.toFixed(2)))
+      .size > 1,
+  );
+  return { planks: crate.fragments.length };
+});
+
+test('Unbroken walls stop a low-speed push', (sim) => {
+  place(sim, -11, groundHeight(-33) + 0.75, -33, -1, 0, 0);
+  tick(sim, 100, -0.08, 0);
+  const house = sim.groups.get('house_00');
+  assert.ok(sim.ball.translation().x > -12.7);
+  assert.equal(house.filter((p) => p.state !== 'intact').length, 0);
+  return { ballX: sim.ball.translation().x };
+});
+
+test('Losing supporting walls collapses upper storeys and the roof', (sim) => {
+  const house = sim.groups.get('house_00');
+  const supports = house.filter(
+    (p) => p.definition.kind === 'wall' && p.definition.level === 0,
+  );
+  const velocity = { x: 12, y: 0, z: 0 },
+    origin = sim.ball.translation();
+  for (const p of supports.slice(0, Math.ceil(supports.length * 0.35)))
+    sim.breakPiece(p, velocity, origin);
+  assert.ok(house.every((p) => p.state !== 'intact'));
+  assert.ok(
+    house.some((p) => p.definition.kind === 'roof' && p.state === 'debris'),
+  );
+  return { collapsedParts: house.length };
+});
+
+test('Debris stays within its budget, expires, and reset restores every part', (sim) => {
+  const velocity = { x: 10, y: 0, z: 0 },
+    origin = sim.ball.translation();
+  for (const p of sim.pieces.slice(0, 200))
+    if (p.state === 'intact') sim.breakPiece(p, velocity, origin);
+  assert.ok(sim.debris.length <= DESTRUCTION.maxDebris);
+  assert.ok(
+    sim.pieces.filter((p) => p.body.isEnabled() && p.body.isDynamic()).length <=
+      DESTRUCTION.maxDebris,
+  );
+  place(sim, -65, 0.74, 0);
+  tick(sim, 60 * (DESTRUCTION.lifetime + 1), 0, 0, true);
+  assert.equal(sim.debris.length, 0);
+  for (const p of sim.pieces.filter((p) => p.state === 'gone'))
+    assert.equal(p.body.isEnabled(), false);
+  sim.reset();
+  assert.equal(sim.brokenCount, 0);
+  assert.ok(
+    sim.pieces
+      .filter((p) => !p.definition.hidden)
+      .every(
+        (p) => p.state === 'intact' && p.body.isEnabled() && p.body.isFixed(),
+      ),
+  );
+  for (const p of sim.pieces) {
+    const position = p.body.translation(),
+      spawn = p.definition.position;
+    assert.ok(
+      Math.hypot(
+        position.x - spawn[0],
+        position.y - spawn[1],
+        position.z - spawn[2],
+      ) < 0.0001,
+    );
+  }
+  return { restoredParts: sim.pieces.length, maxDebris: DESTRUCTION.maxDebris };
+});
+
 test('Street ramp sends a rolling ball into the air', (sim) => {
   place(sim, 0, 0.75, 13, 0, 0, 22);
   let height = 0,

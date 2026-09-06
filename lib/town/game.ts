@@ -1,19 +1,39 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { TownSimulation, TUNING, type Layout } from './simulation';
+import {
+  TownSimulation,
+  TUNING,
+  DESTRUCTION,
+  type Layout,
+  type Piece,
+} from './simulation';
 import { registerGameTools } from './webmcp';
+import { OrbitInput, screenToWorld } from './controls';
 export type GameStats = {
   speed: number;
   airborne: boolean;
   distance: number;
   fps: number;
+  broken: number;
 };
 type Visual = {
   body: RAPIER.RigidBody;
   object: THREE.Object3D;
   prev: THREE.Vector3;
   prevQ: THREE.Quaternion;
+  prop?: TownSimulation['props'][number];
+};
+type PieceVisual = {
+  piece: Piece;
+  mesh: THREE.InstancedMesh;
+  ghost: THREE.InstancedMesh;
+  index: number;
+  scale: THREE.Vector3;
+  prev: THREE.Vector3;
+  prevQ: THREE.Quaternion;
+  renderedState: string;
+  opacity: number;
 };
 export class TownGame {
   host: HTMLElement;
@@ -23,6 +43,15 @@ export class TownGame {
   sun = new THREE.DirectionalLight(0xffffff, 3.0);
   sim!: TownSimulation;
   visuals: Visual[] = [];
+  pieceVisuals: PieceVisual[] = [];
+  ghostMeshes: THREE.InstancedMesh[] = [];
+  orbit = new OrbitInput();
+  cameraRadius = 17;
+  occludedGroups = new Map<string, number>();
+  cameraProbe = new RAPIER.Ball(0.3);
+  matrix = new THREE.Matrix4();
+  scaleTemp = new THREE.Vector3();
+  previousImpact = 0;
   keys = new Set<string>();
   touch = { x: 0, z: 0 };
   brake = false;
@@ -40,7 +69,6 @@ export class TownGame {
   reportPause: (v: boolean) => void;
   ballGroup = new THREE.Group();
   target = new THREE.Vector3();
-  desiredCamera = new THREE.Vector3();
   temp = new THREE.Vector3();
   qtemp = new THREE.Quaternion();
   cameraDirection = new THREE.Vector3();
@@ -64,11 +92,13 @@ export class TownGame {
         'ShiftRight',
         'KeyR',
         'KeyP',
+        'KeyC',
       ].includes(e.code)
     ) {
       e.preventDefault();
       if (e.code === 'KeyP' && !e.repeat) this.setPaused(!this.paused);
       else if (e.code === 'KeyR' && !e.repeat) this.reset();
+      else if (e.code === 'KeyC' && !e.repeat) this.resetCamera();
       else if (e.code === 'Space' && !e.repeat) this.jump();
       this.keys.add(e.code);
     }
@@ -78,6 +108,7 @@ export class TownGame {
     this.keys.clear();
     this.touch = { x: 0, z: 0 };
     this.brake = false;
+    this.cancelOrbit();
     if (this.sim) this.setPaused(true);
   };
   onVisibility = () => {
@@ -89,6 +120,44 @@ export class TownGame {
     this.setPaused(true);
   };
   onContextRestored = () => this.reset();
+  onPointerDown = (e: PointerEvent) => {
+    if (
+      this.paused ||
+      !this.sim ||
+      (e.pointerType === 'mouse' && e.button !== 0 && e.button !== 2)
+    )
+      return;
+    if (this.orbit.begin(e.pointerId, e.clientX, e.clientY)) {
+      e.preventDefault();
+      this.renderer.domElement.setPointerCapture(e.pointerId);
+      this.renderer.domElement.style.cursor = 'grabbing';
+    }
+  };
+  onPointerMove = (e: PointerEvent) => {
+    if (
+      this.orbit.move(
+        e.pointerId,
+        e.clientX,
+        e.clientY,
+        this.host.clientWidth,
+        this.host.clientHeight,
+      )
+    )
+      e.preventDefault();
+  };
+  onPointerUp = (e: PointerEvent) => {
+    this.orbit.end(e.pointerId);
+    if (this.renderer.domElement.hasPointerCapture(e.pointerId))
+      this.renderer.domElement.releasePointerCapture(e.pointerId);
+    if (!this.orbit.pointer) this.renderer.domElement.style.cursor = 'grab';
+  };
+  cancelOrbit() {
+    const id = this.orbit.pointer?.id;
+    this.orbit.cancel();
+    if (id !== undefined && this.renderer.domElement.hasPointerCapture(id))
+      this.renderer.domElement.releasePointerCapture(id);
+    this.renderer.domElement.style.cursor = 'grab';
+  }
   constructor(
     host: HTMLElement,
     report: (s: GameStats) => void,
@@ -158,6 +227,8 @@ export class TownGame {
       loader.loadAsync(model('cone.glb')),
     ]);
     if (this.dead) return;
+    this.sim = new TownSimulation(layout);
+    this.createPieceVisuals(gltf.scene);
     gltf.scene.traverse((o) => {
       if (o instanceof THREE.Mesh) {
         o.castShadow = !/Town_(grass|asphalt|walk|white)/.test(o.name);
@@ -165,7 +236,6 @@ export class TownGame {
       }
     });
     this.scene.add(gltf.scene);
-    this.sim = new TownSimulation(layout);
     this.createBall();
     this.scene.add(this.ballGroup);
     this.addVisual(this.sim.ball, this.ballGroup);
@@ -179,12 +249,20 @@ export class TownGame {
       });
       this.scene.add(object);
       this.addVisual(p.body, object);
+      this.visuals[this.visuals.length - 1].prop = p;
     }
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('blur', this.onBlur);
     document.addEventListener('visibilitychange', this.onVisibility);
     this.host.addEventListener('contextmenu', this.onContext);
+    const canvas = this.renderer.domElement;
+    canvas.style.cursor = 'grab';
+    canvas.addEventListener('pointerdown', this.onPointerDown);
+    canvas.addEventListener('pointermove', this.onPointerMove);
+    canvas.addEventListener('pointerup', this.onPointerUp);
+    canvas.addEventListener('pointercancel', this.onPointerUp);
+    canvas.addEventListener('lostpointercapture', this.onPointerUp);
     this.renderer.domElement.addEventListener(
       'webglcontextlost',
       this.onContextLost,
@@ -259,6 +337,175 @@ export class TownGame {
     this.ring.rotation.x = -Math.PI / 2;
     this.scene.add(this.ring);
   }
+  createPieceVisuals(root: THREE.Object3D) {
+    const byId = new Map(this.sim.pieces.map((p) => [p.definition.id, p]));
+    const batches = new Map<
+      string,
+      Array<{ source: THREE.Mesh; piece: Piece; scale: THREE.Vector3 }>
+    >();
+    root.updateMatrixWorld(true);
+    const sources: THREE.Mesh[] = [];
+    root.traverse((o) => {
+      if (o instanceof THREE.Mesh && typeof o.userData.pieceId === 'string')
+        sources.push(o);
+    });
+    for (const source of sources) {
+      const piece = byId.get(source.userData.pieceId);
+      if (!piece) throw Error(`Missing collider for ${source.name}`);
+      const scale = new THREE.Vector3();
+      source.matrixWorld.decompose(
+        new THREE.Vector3(),
+        new THREE.Quaternion(),
+        scale,
+      );
+      const key =
+        source.geometry.uuid +
+        (Array.isArray(source.material)
+          ? source.material.map((m) => m.uuid).join()
+          : source.material.uuid);
+      const list = batches.get(key) ?? [];
+      list.push({ source, piece, scale });
+      batches.set(key, list);
+      source.removeFromParent();
+    }
+    const plank = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshStandardMaterial({ color: '#bc8143', roughness: 0.85 }),
+    );
+    const fragments = this.sim.pieces.filter((p) => p.definition.hidden);
+    batches.set(
+      'crate-fragments',
+      fragments.map((piece) => ({
+        source: plank,
+        piece,
+        scale: new THREE.Vector3(
+          ...(piece.definition.half.map((h) => h * 2) as [
+            number,
+            number,
+            number,
+          ]),
+        ),
+      })),
+    );
+    const ghostMaterials = new Map<THREE.Material, THREE.Material>();
+    const ghostMaterial = (material: THREE.Material) => {
+      let ghost = ghostMaterials.get(material);
+      if (!ghost) {
+        ghost = material.clone();
+        ghost.transparent = true;
+        ghost.opacity = 0.1;
+        ghost.depthWrite = false;
+        ghostMaterials.set(material, ghost);
+      }
+      return ghost;
+    };
+    for (const list of batches.values()) {
+      if (!list.length) continue;
+      const source = list[0].source;
+      const mesh = new THREE.InstancedMesh(
+        source.geometry,
+        source.material,
+        list.length,
+      );
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.castShadow = mesh.receiveShadow = true;
+      mesh.frustumCulled = true;
+      this.scene.add(mesh);
+      // A separate transparent batch keeps the rest of the town opaque and correctly depth-tested.
+      const ghost = new THREE.InstancedMesh(
+        source.geometry,
+        Array.isArray(source.material)
+          ? source.material.map(ghostMaterial)
+          : ghostMaterial(source.material),
+        list.length,
+      );
+      ghost.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      ghost.visible = false;
+      this.ghostMeshes.push(ghost);
+      this.scene.add(ghost);
+      list.forEach(({ piece, scale }, index) => {
+        const p = piece.body.translation(),
+          q = piece.body.rotation();
+        this.pieceVisuals.push({
+          piece,
+          mesh,
+          ghost,
+          index,
+          scale,
+          prev: new THREE.Vector3(p.x, p.y, p.z),
+          prevQ: new THREE.Quaternion(q.x, q.y, q.z, q.w),
+          renderedState: '',
+          opacity: 1,
+        });
+      });
+    }
+    if (sources.length !== this.sim.pieces.length - fragments.length)
+      throw Error('Some town parts have no visible mesh.');
+    this.updatePieceVisuals(1);
+  }
+  updatePieceVisuals(alpha: number) {
+    const changed = new Set<THREE.InstancedMesh>();
+    const visibleGhosts = new Set<THREE.InstancedMesh>();
+    for (const v of this.pieceVisuals) {
+      const p = v.piece;
+      const opacity =
+        p.state === 'intact' && this.occludedGroups.has(p.definition.group)
+          ? 0.12
+          : 1;
+      if (opacity < 1) visibleGhosts.add(v.ghost);
+      if (
+        p.state === v.renderedState &&
+        p.state !== 'debris' &&
+        opacity === v.opacity
+      )
+        continue;
+      v.opacity = opacity;
+      const position = p.body.translation(),
+        rotation = p.body.rotation();
+      this.temp.set(position.x, position.y, position.z);
+      this.qtemp.set(rotation.x, rotation.y, rotation.z, rotation.w);
+      if (p.state === 'debris') {
+        if (v.renderedState !== 'debris') {
+          v.prev.copy(this.temp);
+          v.prevQ.copy(this.qtemp);
+        }
+        this.temp.lerpVectors(v.prev, this.temp, alpha);
+        this.qtemp.slerpQuaternions(v.prevQ, this.qtemp, alpha);
+      }
+      const size =
+        p.state === 'gone'
+          ? 0
+          : p.state === 'debris'
+            ? Math.min(
+                1,
+                Math.max(
+                  0,
+                  (DESTRUCTION.lifetime - p.age) / DESTRUCTION.shrinkTime,
+                ),
+              )
+            : 1;
+      this.matrix.compose(
+        this.temp,
+        this.qtemp,
+        this.scaleTemp.copy(v.scale).multiplyScalar(opacity < 1 ? 0 : size),
+      );
+      v.mesh.setMatrixAt(v.index, this.matrix);
+      v.mesh.instanceMatrix.needsUpdate = true;
+      this.matrix.compose(
+        this.temp,
+        this.qtemp,
+        this.scaleTemp.copy(v.scale).multiplyScalar(opacity < 1 ? size : 0),
+      );
+      v.ghost.setMatrixAt(v.index, this.matrix);
+      v.ghost.instanceMatrix.needsUpdate = true;
+      changed.add(v.ghost);
+      changed.add(v.mesh);
+      v.renderedState = p.state;
+    }
+    for (const mesh of changed) mesh.computeBoundingSphere();
+    for (const ghost of this.ghostMeshes)
+      ghost.visible = visibleGhosts.has(ghost);
+  }
   addVisual(body: RAPIER.RigidBody, object: THREE.Object3D) {
     const p = body.translation(),
       q = body.rotation();
@@ -283,6 +530,18 @@ export class TownGame {
       speedKmh: Math.hypot(v.x, v.z) * 3.6,
       distanceMetres: this.sim.distance,
       jumps: this.sim.jumps,
+      brokenPieces: this.sim.brokenCount,
+      activeDebris: this.sim.debris.length,
+      camera: {
+        yaw: this.orbit.yaw,
+        pitch: this.orbit.pitch,
+        distance: this.cameraRadius,
+        fadedObstructions: this.occludedGroups.size,
+      },
+      renderer: {
+        drawCalls: this.renderer.info.render.calls,
+        triangles: this.renderer.info.render.triangles,
+      },
     };
   }
   setBrake(v: boolean) {
@@ -296,6 +555,7 @@ export class TownGame {
     this.keys.clear();
     this.touch = { x: 0, z: 0 };
     this.brake = false;
+    this.cancelOrbit();
     this.accumulator = 0;
     this.last = performance.now();
     this.reportPause(value);
@@ -332,10 +592,10 @@ export class TownGame {
     this.brake = false;
     this.accumulator = 0;
     this.previousJump = 0;
-    const p = this.sim.ball.translation();
-    this.target.set(p.x, p.y + 1, p.z + 2.3);
-    this.camera.position.set(p.x, p.y + 8.2, p.z - 13.5);
-    this.camera.lookAt(this.target);
+    this.previousImpact = 0;
+    this.resetCamera();
+    for (const v of this.pieceVisuals) v.renderedState = '';
+    this.updatePieceVisuals(1);
     for (const v of this.visuals) {
       const p = v.body.translation(),
         q = v.body.rotation();
@@ -343,8 +603,24 @@ export class TownGame {
       v.object.position.copy(v.prev);
       v.prevQ.set(q.x, q.y, q.z, q.w);
       v.object.quaternion.copy(v.prevQ);
+      v.object.visible = true;
     }
-    this.report({ speed: 0, airborne: false, distance: 0, fps: 0 });
+    this.report({ speed: 0, airborne: false, distance: 0, fps: 0, broken: 0 });
+  }
+  resetCamera() {
+    if (!this.sim) return;
+    this.cancelOrbit();
+    this.orbit.reset();
+    this.cameraRadius = 17;
+    this.occludedGroups.clear();
+    const p = this.sim.ball.translation();
+    this.target.set(p.x, p.y + 1, p.z);
+    this.camera.position.set(
+      p.x,
+      this.target.y + Math.sin(this.orbit.pitch) * 17,
+      this.target.z - Math.cos(this.orbit.pitch) * 17,
+    );
+    this.camera.lookAt(this.target);
   }
   frame = (now: number) => {
     if (this.dead) return;
@@ -361,7 +637,7 @@ export class TownGame {
         (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0) -
         (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0) +
         this.touch.z;
-      // Fixed camera heading makes screen-relative steering stable, including full circles.
+      const direction = screenToWorld(x, z, this.orbit.yaw);
       while (this.accumulator >= TUNING.step) {
         for (const v of this.visuals) {
           const p = v.body.translation(),
@@ -369,9 +645,16 @@ export class TownGame {
           v.prev.set(p.x, p.y, p.z);
           v.prevQ.set(q.x, q.y, q.z, q.w);
         }
+        for (const v of this.pieceVisuals)
+          if (v.piece.state === 'debris') {
+            const p = v.piece.body.translation(),
+              q = v.piece.body.rotation();
+            v.prev.set(p.x, p.y, p.z);
+            v.prevQ.set(q.x, q.y, q.z, q.w);
+          }
         this.sim.step(
-          -x,
-          z,
+          direction.x,
+          direction.z,
           this.brake ||
             this.keys.has('ShiftLeft') ||
             this.keys.has('ShiftRight'),
@@ -380,6 +663,7 @@ export class TownGame {
       }
       const alpha = this.accumulator / TUNING.step;
       for (const v of this.visuals) {
+        if (v.prop) v.object.visible = !v.prop.broken;
         const p = v.body.translation(),
           q = v.body.rotation();
         v.object.position
@@ -389,11 +673,16 @@ export class TownGame {
           .copy(v.prevQ)
           .slerp(this.qtemp.set(q.x, q.y, q.z, q.w), alpha);
       }
+      if (this.sim.impactSerial !== this.previousImpact) {
+        this.tone(115, 0.16, 0.075);
+        this.previousImpact = this.sim.impactSerial;
+      }
       if (this.sim.jumps !== this.previousJump) {
         this.tone(280, 0.18);
         this.previousJump = this.sim.jumps;
       }
       this.updateCamera(elapsed);
+      this.updatePieceVisuals(alpha);
     }
     this.renderer.render(this.scene, this.camera);
     this.statsTime += elapsed;
@@ -405,6 +694,7 @@ export class TownGame {
         airborne: !this.sim.grounded,
         distance: this.sim.distance,
         fps: Math.round(this.frameCount / this.statsTime),
+        broken: this.sim.brokenCount,
       });
       this.statsTime = 0;
       this.frameCount = 0;
@@ -414,33 +704,66 @@ export class TownGame {
     const p = this.ballGroup.position,
       v = this.sim.ball.linvel(),
       speed = Math.hypot(v.x, v.z);
-    const look = this.temp.set(p.x + v.x * 0.18, p.y + 1, p.z + 2 + v.z * 0.22);
-    this.target.lerp(look, 1 - Math.exp(-5 * dt));
-    this.desiredCamera.set(
-      p.x,
-      p.y + 8.2 + speed * 0.075,
-      p.z - 13.5 - speed * 0.11,
+    const { yaw, pitch } = this.orbit;
+    // Cast from above the ball itself; a look-ahead pivot can sit inside an intact wall.
+    this.target.set(p.x, p.y + 1, p.z);
+    this.cameraDirection.set(
+      -Math.sin(yaw) * Math.cos(pitch),
+      Math.sin(pitch),
+      -Math.cos(yaw) * Math.cos(pitch),
     );
-    this.cameraDirection.copy(this.desiredCamera).sub(this.target);
-    const distance = this.cameraDirection.length();
-    this.cameraDirection.normalize();
-    const hit = this.sim.world.castRay(
-      new RAPIER.Ray(this.target, this.cameraDirection),
-      distance,
-      true,
-      RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC,
-    );
-    if (hit && hit.timeOfImpact < distance) {
-      // Lift above nearby roofs; do not rotate with sphere spin or force manual camera input.
-      this.desiredCamera
-        .copy(this.target)
-        .addScaledVector(
-          this.cameraDirection,
-          Math.max(2, hit.timeOfImpact - 0.9),
-        );
-      this.desiredCamera.y = Math.max(this.desiredCamera.y, p.y + 5.5);
+    const distance = 17 + speed * 0.12;
+    for (const [group, time] of this.occludedGroups) {
+      if (time <= dt) this.occludedGroups.delete(group);
+      else this.occludedGroups.set(group, time - dt);
     }
-    this.camera.position.lerp(this.desiredCamera, 1 - Math.exp(-7 * dt));
+    const excluded = new Set<string>();
+    let clearDistance = distance;
+    for (let i = 0; i < 8; i++) {
+      const hit = this.sim.world.castShape(
+        this.target,
+        { x: 0, y: 0, z: 0, w: 1 },
+        this.cameraDirection,
+        this.cameraProbe,
+        0.08,
+        distance,
+        true,
+        RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC,
+        undefined,
+        undefined,
+        undefined,
+        (collider) => {
+          const part = this.sim.breakableColliders.get(collider.handle);
+          return (
+            !part ||
+            !('definition' in part) ||
+            !excluded.has(part.definition.group)
+          );
+        },
+      );
+      if (!hit) break;
+      const part = this.sim.breakableColliders.get(hit.collider.handle);
+      if (hit.time_of_impact < 8 && part && 'definition' in part) {
+        // Make nearby obstructions a cutaway, preserving a useful view during destruction.
+        excluded.add(part.definition.group);
+        this.occludedGroups.set(part.definition.group, 0.22);
+      } else {
+        clearDistance = Math.max(0.5, hit.time_of_impact - 0.12);
+        break;
+      }
+    }
+    // Immediately move inward at an obstruction; ease back out when the path clears.
+    this.cameraRadius =
+      clearDistance < this.cameraRadius
+        ? clearDistance
+        : THREE.MathUtils.lerp(
+            this.cameraRadius,
+            clearDistance,
+            1 - Math.exp(-5 * dt),
+          );
+    this.camera.position
+      .copy(this.target)
+      .addScaledVector(this.cameraDirection, this.cameraRadius);
     this.camera.lookAt(this.target);
     const fov = 52 + Math.min(7, speed * 0.25);
     this.camera.fov = THREE.MathUtils.lerp(
@@ -486,6 +809,13 @@ export class TownGame {
     window.removeEventListener('blur', this.onBlur);
     document.removeEventListener('visibilitychange', this.onVisibility);
     this.host.removeEventListener('contextmenu', this.onContext);
+    this.cancelOrbit();
+    const canvas = this.renderer.domElement;
+    canvas.removeEventListener('pointerdown', this.onPointerDown);
+    canvas.removeEventListener('pointermove', this.onPointerMove);
+    canvas.removeEventListener('pointerup', this.onPointerUp);
+    canvas.removeEventListener('pointercancel', this.onPointerUp);
+    canvas.removeEventListener('lostpointercapture', this.onPointerUp);
     this.renderer.domElement.removeEventListener(
       'webglcontextlost',
       this.onContextLost,
@@ -499,6 +829,7 @@ export class TownGame {
       textures = new Set<THREE.Texture>();
     this.scene.traverse((o) => {
       if (o instanceof THREE.Mesh) {
+        if (o instanceof THREE.InstancedMesh) o.dispose();
         geometries.add(o.geometry);
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
           materials.add(m);

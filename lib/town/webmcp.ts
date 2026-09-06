@@ -43,7 +43,7 @@ export function registerGameTools(game: Game) {
       name: 'get_rolling_town_state',
       title: 'Read Rolling Town state',
       description:
-        'Read the current ball position, speed, distance, jumps, and pause state.',
+        'Read ball position, speed, distance, jumps, broken-piece count, active debris, camera angles and pause state.',
       inputSchema: {
         type: 'object',
         properties: {},
@@ -80,7 +80,7 @@ export function registerGameTools(game: Game) {
       name: 'reset_rolling_town',
       title: 'Reset Rolling Town',
       description:
-        'Return the ball and movable objects to their starting positions and clear the distance counter, just like the visible reset button.',
+        'Restore the ball, all destructible parts and movable objects, clear counters and reset the camera, just like the visible reset button.',
       inputSchema: {
         type: 'object',
         properties: {},
