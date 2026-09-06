@@ -32,9 +32,9 @@
     {
       "test": "A fast ball breaches separate facade panels",
       "status": "pass",
-      "brokenPanels": 6,
-      "remainingPanels": 42,
-      "ballX": -13.654825210571289
+      "brokenPanels": 7,
+      "remainingPanels": 73,
+      "ballX": -14.074962615966797
     },
     {
       "test": "A gentle bump moves a crate without shattering it",
@@ -49,17 +49,17 @@
     {
       "test": "Unbroken walls stop a low-speed push",
       "status": "pass",
-      "ballX": -10.638349533081055
+      "ballX": -10.646316528320312
     },
     {
       "test": "Losing supporting walls collapses upper storeys and the roof",
       "status": "pass",
-      "collapsedParts": 48
+      "collapsedParts": 80
     },
     {
       "test": "Break events are bounded and reset restores every original collider",
       "status": "pass",
-      "restoredParts": 1069,
+      "restoredParts": 1517,
       "maxQueuedBursts": 32
     },
     {
@@ -81,9 +81,9 @@
         144
       ],
       "position": {
-        "x": 19.19672393798828,
-        "y": 0.705613374710083,
-        "z": 49.844078063964844
+        "x": 18.79827308654785,
+        "y": 0.7165294885635376,
+        "z": 49.40736389160156
       }
     }
   ]

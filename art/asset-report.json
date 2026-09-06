@@ -1,14 +1,14 @@
 {
   "houses": 14,
   "staticMeshes": 9,
-  "destructiblePieces": 1069,
-  "uniquePieceMeshes": 237,
+  "destructiblePieces": 1517,
+  "uniquePieceMeshes": 186,
   "polygons": 105971,
   "files": {
-    "colliders.json": 261057,
+    "colliders.json": 387153,
     "cone.glb": 12804,
     "crate.glb": 15404,
-    "house.glb": 1201752,
-    "town.glb": 4694100
+    "house.glb": 933664,
+    "town.glb": 3116300
   }
 }

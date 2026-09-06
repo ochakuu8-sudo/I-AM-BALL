@@ -14,6 +14,7 @@
     "format": "oxfmt",
     "test:physics": "node --experimental-strip-types scripts/test-physics.mjs",
     "test:fragments": "node --experimental-strip-types scripts/test-fragments.mjs",
+    "test:structure": "node --experimental-strip-types scripts/test-structure.mjs",
     "test:controls": "node --experimental-strip-types scripts/test-controls.mjs",
     "test:assets": "node scripts/test-assets.mjs"
   },

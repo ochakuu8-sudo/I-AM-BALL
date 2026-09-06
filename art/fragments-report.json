@@ -20,33 +20,33 @@
     {
       "test": "Only large chunks collide; their colliders fit shards and leave a wall breach passable",
       "status": "pass",
-      "ballX": -13.640390396118164,
+      "ballX": -14.074962615966797,
       "fragments": {
-        "small": 72,
-        "medium": 32,
-        "large": 8,
-        "physicsBodies": 8,
+        "small": 36,
+        "medium": 15,
+        "large": 0,
+        "physicsBodies": 0,
         "capacity": 384
       }
     },
     {
-      "test": "A whole-house collapse emits bounded delayed waves with downward velocity",
+      "test": "Retained walls use bounded chips while the structural simulation carries their mass",
       "status": "pass",
-      "destroyedParts": 48,
-      "fragments": 107,
-      "physicsBodies": 11
+      "impactChips": 25,
+      "collapseChips": 10,
+      "landingChips": 18
     },
     {
       "test": "Repeated hits and many buildings respect global particle and rigid-body caps",
       "status": "pass",
       "maxFragments": 384,
-      "maxBodies": 24,
+      "maxBodies": 4,
       "emptyAfterSeconds": 4
     },
     {
       "test": "Reset cancels delayed collapses and pooled bodies never create ghost debris",
       "status": "pass",
-      "restoredParts": 1069,
+      "restoredParts": 1517,
       "pooledBodiesReusable": true
     },
     {

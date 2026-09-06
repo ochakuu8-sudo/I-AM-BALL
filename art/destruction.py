@@ -62,6 +62,8 @@ def house_chunks(objects, style):
     for o in objects:
         if 'chunk' in o:
             key = o['chunk']
+            if key.startswith('wall_') and not o.name.startswith('Wall'):
+                key = key.replace('wall_', 'detail_', 1)
         elif o.name.startswith('Raised_masonry_foundation'):
             key = 'foundation'
         else:
@@ -81,13 +83,13 @@ def house_chunks(objects, style):
                 else:
                     side = 'front' if z > 0 else 'back'
                     part = min(3, max(0, int((x + 3.8) / 1.9)))
-                key = 'wall_%d_%s_%d' % (level, side, part)
+                key = 'detail_%d_%s_%d' % (level, side, part)
         buckets.setdefault(key, []).append(o)
     result = []
     for key, parts in buckets.items():
         kind = key.split('_')[0]
-        level = int(key.split('_')[1]) if kind == 'wall' else (2 if kind == 'roof' else 1)
-        section = '_'.join(key.split('_')[2:]) if kind == 'wall' else key
+        level = int(key.split('_')[1]) if kind in ['wall','detail'] else (2 if kind == 'roof' else 1)
+        section = '_'.join(key.split('_')[2:4]) if kind in ['wall','detail'] else key
         result.append(chunk(parts, 'House_%d_%s' % (style, key), kind, level, section))
     return result
 
@@ -111,4 +113,6 @@ def register(objects, group, definitions, meshes, strength=14):
                             'position': [round(position.x, 5), round(position.z, 5), round(-position.y, 5)],
                             'half': [max(.045, half[0]), max(.045, half[2]), max(.045, half[1])],
                             'rotation': [q.x, q.y, q.z, q.w], 'strength': resistance})
+        if kind == 'wall':
+            definitions[-1]['fracture'] = 'side' if o['section'].startswith(('left','right')) else 'front'
         meshes.append(o)

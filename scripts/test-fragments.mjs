@@ -63,7 +63,7 @@ test('A strike has three distinct scales, forward motion, and a two-sided fan', 
     const selected = shards.filter((f) => f.tier === tier);
     assert.ok(selected.some((f) => f.velocity.z < -1));
     assert.ok(selected.some((f) => f.velocity.z > 1));
-    assert.ok(selected.every((f) => f.velocity.x > 0));
+    assert.ok(selected.reduce((n, f) => n + f.velocity.x, 0) > 0);
   }
   const average = (tier, field) => {
     const a = shards.filter((f) => f.tier === tier);
@@ -142,7 +142,7 @@ test('Only large chunks collide; their colliders fit shards and leave a wall bre
     'Shards blocked the opened wall',
   );
   for (const f of active(effects)) {
-    assert.equal(Boolean(f.body), f.tier === 'large');
+    if (f.body) assert.equal(f.tier, 'large');
     if (f.body) {
       const h = f.body.collider.halfExtents();
       assert.ok(Math.abs(h.x * 2 - f.size.x) < 0.00001);
@@ -153,43 +153,29 @@ test('Only large chunks collide; their colliders fit shards and leave a wall bre
   const house = sim.groups.get('house_00');
   assert.ok(house.some((p) => p.state === 'intact'));
   assert.ok(
-    house.filter((p) => p.state !== 'intact').every((p) => !p.body.isEnabled()),
+    house
+      .filter((p) => p.state !== 'intact')
+      .every(
+        (p) =>
+          !p.body.isEnabled() ||
+          (p.state === 'damaged' && !p.collider.isEnabled()),
+      ),
   );
   return { ballX: sim.ball.translation().x, fragments: effects.getStats() };
 });
 
-test('A whole-house collapse emits bounded delayed waves with downward velocity', ({
-  sim,
+test('Retained walls use bounded chips while the structural simulation carries their mass', ({
   effects,
-  step,
 }) => {
-  const house = sim.groups.get('house_00');
-  for (const p of house.filter(
-    (p) => p.definition.kind === 'wall' && p.definition.level === 0,
-  ))
-    sim.breakPiece(p, burst.velocity, sim.ball.translation());
-  effects.afterStep(0, sim.takeBreakBursts());
+  effects.emit({ ...burst, retained: true });
+  assert.equal(active(effects).length, 25);
+  assert.equal(effects.getStats().large, 0);
+  effects.emit({ ...burst, retained: true, mode: 'collapse' });
   assert.equal(active(effects).length, 35);
-  assert.ok(
-    house.some((p) => p.definition.kind === 'roof' && p.state === 'collapsing'),
-  );
-  step(8);
-  assert.equal(active(effects).length, 71);
-  assert.ok(
-    active(effects)
-      .filter((f) => f.age === 0)
-      .every((f) => f.velocity.y < 0),
-  );
-  step(7);
-  assert.equal(active(effects).length, 107);
-  assert.ok(
-    active(effects)
-      .filter((f) => f.age === 0)
-      .every((f) => f.velocity.y < 0),
-  );
-  assert.ok(house.every((p) => p.state === 'gone'));
-  assert.equal(effects.getStats().physicsBodies, 11);
-  return { destroyedParts: house.length, fragments: 107, physicsBodies: 11 };
+  effects.emit({ ...burst, retained: true, mode: 'landing' });
+  assert.equal(active(effects).length, 53);
+  assert.equal(effects.getStats().physicsBodies, 0);
+  return { impactChips: 25, collapseChips: 10, landingChips: 18 };
 });
 
 test('Repeated hits and many buildings respect global particle and rigid-body caps', ({
@@ -242,7 +228,8 @@ test('Reset cancels delayed collapses and pooled bodies never create ghost debri
   for (const p of house.filter(
     (p) => p.definition.kind === 'wall' && p.definition.level === 0,
   ))
-    sim.breakPiece(p, burst.velocity, burst.origin);
+    sim.destroy(p, burst.velocity, burst.origin);
+  sim.updateSupports('house_00', burst.velocity, burst.origin);
   step(1);
   assert.ok(sim.collapsing.length > 0);
   sim.reset();

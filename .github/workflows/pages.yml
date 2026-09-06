@@ -36,6 +36,8 @@ jobs:
         run: npm run test:physics
       - name: Check layered fragments
         run: npm run test:fragments
+      - name: Check partial walls and structural collapse
+        run: npm run test:structure
       - name: Check camera controls
         run: npm run test:controls
       - name: Check Blender collision alignment

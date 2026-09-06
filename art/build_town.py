@@ -6,6 +6,7 @@ random.seed(42)
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'art'))
 from destruction import chunk, house_chunks, register
+from fracture_patterns import PATTERNS
 OUT=ROOT/'public'/'models'
 ART=ROOT/'art'
 OUT.mkdir(parents=True,exist_ok=True); ART.mkdir(parents=True,exist_ok=True)
@@ -182,7 +183,8 @@ hero=house(0);export(hero,OUT/'house.glb')
 ground=box('Studio_ground',(0,-.47,0),(200,.15,200),'grass')
 studio=lighting()
 bpy.ops.wm.save_as_mainfile(filepath=str(ART/'hillside-house.blend'))
-bpy.context.scene.render.filepath=str(ART/'hillside-house.png');bpy.ops.render.render(write_still=True)
+bpy.context.scene.render.filepath=str(ART/'hillside-house.png')
+if not os.environ.get('TOWN_SKIP_RENDER'):bpy.ops.render.render(write_still=True)
 for o in studio+[ground]:bpy.data.objects.remove(o,do_unlink=True)
 templates=[hero,house(1),house(2)]
 # Hide templates by moving them; town copies keep shared mesh data until the final merge.
@@ -322,7 +324,7 @@ alltown+=since(before)
 alltown=list(dict.fromkeys(alltown))
 merged=merge(alltown,'Town')
 export(merged+breakable_meshes,OUT/'town.glb')
-(OUT/'colliders.json').write_text(json.dumps({'colliders':colliders,'pieces':pieces,'props':prop_spawns,'houseCount':len(lots)},separators=(',',':')))
+(OUT/'colliders.json').write_text(json.dumps({'colliders':colliders,'pieces':pieces,'props':prop_spawns,'houseCount':len(lots),'fracturePatterns':PATTERNS},separators=(',',':')))
 # Export a dynamic wooden crate and traffic cone.
 before=set(bpy.context.scene.objects)
 box('Crate',(0,0,0),(1,1,1),'wood',.04)
@@ -341,7 +343,7 @@ lighting((95,90,120),(3,0,-5),155)
 bpy.context.scene.render.resolution_x=1400;bpy.context.scene.render.resolution_y=1000
 bpy.context.scene.render.filepath=str(ART/'town-overview.png')
 bpy.ops.wm.save_as_mainfile(filepath=str(ART/'rolling-town.blend'))
-bpy.ops.render.render(write_still=True)
+if not os.environ.get('TOWN_SKIP_RENDER'):bpy.ops.render.render(write_still=True)
 triangles=sum(len(o.data.polygons) for o in merged+breakable_meshes)
 (ART/'asset-report.json').write_text(json.dumps({'houses':len(lots),'staticMeshes':len(merged),'destructiblePieces':len(pieces),'uniquePieceMeshes':len(set(o.data for o in breakable_meshes)),'polygons':triangles,'files':{f.name:f.stat().st_size for f in OUT.glob('*')}},indent=2))
 print('TOWN_ASSETS_COMPLETE',triangles,len(merged))

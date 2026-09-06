@@ -1,0 +1,54 @@
+{
+  "tests": [
+    {
+      "test": "Authored cells exactly cover the wall with no gaps and retain closed convex volumes",
+      "status": "pass",
+      "patterns": 2,
+      "cellsPerWall": 12
+    },
+    {
+      "test": "A central strike makes a sphere-sized hole while surrounding wall cells remain",
+      "status": "pass",
+      "remainingCells": 3,
+      "removedCells": 6
+    },
+    {
+      "test": "A grazing corner strike removes fewer cells; a second strike expands the damage",
+      "status": "pass",
+      "grazingCells": 1,
+      "totalAfterStrongHit": 7
+    },
+    {
+      "test": "Contact-local damage and hole collision work on rotated walls",
+      "status": "pass",
+      "rotationDegrees": 90,
+      "removedCells": 7
+    },
+    {
+      "test": "Front support damage brings down the front storey first while the rear stays intact",
+      "status": "pass",
+      "rearWallsIntact": true,
+      "fallingRoof": "roof_1_1"
+    },
+    {
+      "test": "A falling wall keeps its full mesh until landing, then breaks into its own cells once",
+      "status": "pass",
+      "firstLandingSeconds": 0.7833333333333333,
+      "allChunksExpired": true
+    },
+    {
+      "test": "Heavy destruction respects shared physics caps and reset clears holes, debris and delayed collapse",
+      "status": "pass",
+      "bodyLimit": 24,
+      "structuralLimit": 128,
+      "visualLimit": 384,
+      "resetLeaks": 0
+    },
+    {
+      "test": "Cell rendering uses opaque geometry, draws the matching remaining cells and clears on reset",
+      "status": "pass",
+      "opaque": true,
+      "resetHidden": true
+    }
+  ]
+}

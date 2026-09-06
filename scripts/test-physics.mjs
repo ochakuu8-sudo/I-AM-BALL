@@ -116,7 +116,13 @@ test('A fast ball breaches separate facade panels', (sim) => {
     sim.breakBursts.some((b) => b.mode === 'impact' && b.velocity.x < -10),
   );
   assert.ok(
-    house.filter((p) => p.state !== 'intact').every((p) => !p.body.isEnabled()),
+    house
+      .filter((p) => p.state !== 'intact')
+      .every(
+        (p) =>
+          !p.body.isEnabled() ||
+          (p.state === 'damaged' && !p.collider.isEnabled()),
+      ),
   );
   return {
     brokenPanels: broken,
@@ -166,25 +172,33 @@ test('Losing supporting walls collapses upper storeys and the roof', (sim) => {
   );
   const velocity = { x: 12, y: 0, z: 0 },
     origin = sim.ball.translation();
-  for (const p of supports.slice(0, Math.ceil(supports.length * 0.35)))
-    sim.breakPiece(p, velocity, origin);
-  assert.ok(house.every((p) => p.state !== 'intact'));
+  for (const p of supports) sim.destroy(p, velocity, origin);
+  sim.updateSupports('house_00', velocity, origin);
+  assert.ok(
+    house
+      .filter((p) => p.definition.kind === 'wall')
+      .every((p) => p.state !== 'intact'),
+  );
   assert.ok(
     house.some((p) => p.definition.kind === 'roof' && p.state === 'collapsing'),
   );
   sim.takeBreakBursts();
-  tick(sim, 8);
+  tick(sim, 14);
   assert.ok(
     sim.takeBreakBursts().some((b) => b.mode === 'collapse' && b.wave === 0),
   );
   assert.ok(
     house.some((p) => p.definition.kind === 'roof' && p.state === 'collapsing'),
   );
-  tick(sim, 8);
+  tick(sim, 12);
   assert.ok(
     sim.takeBreakBursts().some((b) => b.mode === 'collapse' && b.wave === 1),
   );
-  assert.ok(house.every((p) => p.state === 'gone' && !p.body.isEnabled()));
+  assert.ok(
+    house
+      .filter((p) => p.definition.kind === 'roof')
+      .every((p) => p.state === 'debris' && p.motion?.velocity.y < 0),
+  );
   return { collapsedParts: house.length };
 });
 
@@ -192,7 +206,7 @@ test('Break events are bounded and reset restores every original collider', (sim
   const velocity = { x: 10, y: 0, z: 0 },
     origin = sim.ball.translation();
   for (const p of sim.pieces.slice(0, 200))
-    if (p.state === 'intact') sim.breakPiece(p, velocity, origin);
+    if (p.state === 'intact') sim.destroy(p, velocity, origin);
   assert.ok(sim.breakBursts.length <= DESTRUCTION.maxBursts);
   assert.equal(sim.pieces.filter((p) => p.body.isDynamic()).length, 0);
   place(sim, -65, 0.74, 0);

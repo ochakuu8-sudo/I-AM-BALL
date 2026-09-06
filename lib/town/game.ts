@@ -11,6 +11,7 @@ import {
 import { registerGameTools } from './webmcp';
 import { CAMERA, OrbitInput, screenToWorld } from './controls';
 import { FractureEffects } from './fracture';
+import { StructureVisuals } from './structure-visual';
 export type GameStats = {
   speed: number;
   airborne: boolean;
@@ -40,6 +41,7 @@ export class TownGame {
   sun = new THREE.DirectionalLight(0xffffff, 3.0);
   sim!: TownSimulation;
   fracture!: FractureEffects;
+  structureVisuals!: StructureVisuals;
   simulationRevision = 0;
   visuals: Visual[] = [];
   pieceVisuals: PieceVisual[] = [];
@@ -60,6 +62,9 @@ export class TownGame {
   frameCount = 0;
   resizeObserver: ResizeObserver;
   audio: AudioContext | null = null;
+  noise: AudioBuffer | null = null;
+  soundGate = new Map<string, number>();
+  soundVoices = 0;
   report: (s: GameStats) => void;
   reportPause: (v: boolean) => void;
   ballGroup = new THREE.Group();
@@ -211,6 +216,7 @@ export class TownGame {
       this.scene,
       groundHeight,
     );
+    this.structureVisuals = new StructureVisuals(this.sim, this.scene);
     this.createPieceVisuals(gltf.scene);
     this.scene.add(gltf.scene);
     this.createBall();
@@ -300,6 +306,7 @@ export class TownGame {
     for (const source of sources) {
       const piece = byId.get(source.userData.pieceId);
       if (!piece) throw Error(`Missing collider for ${source.name}`);
+      this.structureVisuals.register(piece.definition.id, source);
       this.fracture.registerSource(
         piece.definition.id,
         piece.definition.kind,
@@ -349,18 +356,41 @@ export class TownGame {
       throw Error('Some town parts have no visible mesh.');
     this.updatePieceVisuals();
   }
-  updatePieceVisuals() {
+  updatePieceVisuals(alpha = 1) {
     const changed = new Set<THREE.InstancedMesh>();
     for (const v of this.pieceVisuals) {
       const p = v.piece;
-      if (p.state === v.renderedState && p.state !== 'collapsing') continue;
+      if (
+        p.state === v.renderedState &&
+        !['collapsing', 'debris'].includes(p.state)
+      )
+        continue;
       const position = p.body.translation(),
         rotation = p.body.rotation();
       this.temp.set(position.x, position.y, position.z);
       this.qtemp.set(rotation.x, rotation.y, rotation.z, rotation.w);
       if (p.state === 'collapsing')
         this.temp.y -= Math.min(0.22, p.age * p.age * 8);
-      const size = p.state === 'gone' ? 0 : 1;
+      if (p.state === 'collapsing')
+        this.qtemp.multiply(
+          new THREE.Quaternion().setFromEuler(
+            new THREE.Euler(p.age * 0.35, 0, p.age * 0.2),
+          ),
+        );
+      if (p.state === 'debris' && p.motion) {
+        this.temp.lerpVectors(p.motion.previous, p.motion.position, alpha);
+        this.qtemp.slerpQuaternions(
+          p.motion.previousQ,
+          p.motion.rotation,
+          alpha,
+        );
+      }
+      const size =
+        p.state === 'gone' || p.cells
+          ? 0
+          : p.state === 'debris' && p.motion
+            ? Math.min(1, (p.motion.life - p.motion.age) / 0.6)
+            : 1;
       this.matrix.compose(
         this.temp,
         this.qtemp,
@@ -398,6 +428,9 @@ export class TownGame {
       distanceMetres: this.sim.distance,
       jumps: this.sim.jumps,
       brokenPieces: this.sim.brokenCount,
+      chippedWallCells: this.sim.chippedCells,
+      structuralDebris: this.sim.motion.chunks.length,
+      structuralBodies: this.sim.motion.slots.filter((s) => s.chunk).length,
       activeDebris: this.fracture.fragments.filter((f) => f.active).length,
       fragments: this.fracture.getStats(),
       camera: {
@@ -450,6 +483,94 @@ export class TownGame {
     g.connect(this.audio.destination);
     o.start(t);
     o.stop(t + duration);
+    o.onended = () => {
+      o.disconnect();
+      g.disconnect();
+    };
+  }
+  playDestructionSounds() {
+    const events = this.sim.soundEvents.splice(0);
+    if (this.muted || !this.audio || this.audio.state !== 'running') return;
+    const ctx = this.audio,
+      t = ctx.currentTime;
+    if (!this.noise) {
+      this.noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const a = this.noise.getChannelData(0);
+      for (let i = 0; i < a.length; i++) a[i] = Math.random() * 2 - 1;
+    }
+    for (const e of events.sort((a, b) => b.strength - a.strength)) {
+      const family = ['crate', 'floor', 'bench'].includes(e.kind)
+        ? 'wood'
+        : ['car', 'lamp', 'detail', 'tower'].includes(e.kind)
+          ? 'metal'
+          : 'stone';
+      const key = e.phase;
+      if ((this.soundGate.get(key) ?? 0) > t || this.soundVoices >= 4) continue;
+      this.soundGate.set(key, t + (e.phase === 'impact' ? 0.075 : 0.15));
+      this.soundVoices++;
+      const landing = e.phase === 'landing',
+        collapse = e.phase === 'collapse';
+      const duration = landing ? 0.32 : collapse ? 0.2 : 0.18,
+        gain = ctx.createGain();
+      const level =
+        Math.min(0.16, Math.max(0.025, e.strength * 0.09)) *
+        (collapse ? 0.45 : 1);
+      gain.gain.setValueAtTime(0.001, t);
+      gain.gain.exponentialRampToValueAtTime(level, t + 0.006);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+      gain.connect(ctx.destination);
+      const oscillator = ctx.createOscillator();
+      oscillator.type = family === 'wood' ? 'triangle' : 'sine';
+      oscillator.frequency.setValueAtTime(
+        (landing ? 72 : family === 'metal' ? 180 : 115) *
+          (1 + Math.random() * 0.1),
+        t,
+      );
+      oscillator.frequency.exponentialRampToValueAtTime(
+        landing ? 36 : 55,
+        t + duration,
+      );
+      oscillator.connect(gain);
+      oscillator.start(t);
+      oscillator.stop(t + duration);
+      const noise = ctx.createBufferSource(),
+        filter = ctx.createBiquadFilter(),
+        crack = ctx.createGain();
+      noise.buffer = this.noise;
+      filter.type = 'bandpass';
+      filter.frequency.value = landing
+        ? 650
+        : collapse
+          ? 360
+          : family === 'wood'
+            ? 1200
+            : family === 'metal'
+              ? 3200
+              : 2300;
+      filter.Q.value = family === 'metal' ? 2 : 0.6;
+      const start = t + (landing ? 0.015 : 0.025);
+      crack.gain.setValueAtTime(0.001, start);
+      crack.gain.exponentialRampToValueAtTime(
+        level * (landing ? 1.6 : 2.2),
+        start + 0.004,
+      );
+      crack.gain.exponentialRampToValueAtTime(0.001, start + duration * 0.85);
+      noise.connect(filter);
+      filter.connect(crack);
+      crack.connect(ctx.destination);
+      noise.start(start, Math.random() * 0.4);
+      noise.stop(start + duration);
+      oscillator.onended = () => {
+        oscillator.disconnect();
+        gain.disconnect();
+      };
+      noise.onended = () => {
+        noise.disconnect();
+        filter.disconnect();
+        crack.disconnect();
+        this.soundVoices--;
+      };
+    }
   }
   reset() {
     if (!this.sim) return;
@@ -464,6 +585,7 @@ export class TownGame {
     this.previousImpact = 0;
     for (const v of this.pieceVisuals) v.renderedState = '';
     this.updatePieceVisuals();
+    this.structureVisuals.render(1);
     for (const v of this.visuals) {
       const p = v.body.translation(),
         q = v.body.rotation();
@@ -532,16 +654,14 @@ export class TownGame {
           .copy(v.prevQ)
           .slerp(this.qtemp.set(q.x, q.y, q.z, q.w), alpha);
       }
-      if (this.sim.impactSerial !== this.previousImpact) {
-        this.tone(115, 0.16, 0.075);
-        this.previousImpact = this.sim.impactSerial;
-      }
+      this.playDestructionSounds();
       if (this.sim.jumps !== this.previousJump) {
         this.tone(280, 0.18);
         this.previousJump = this.sim.jumps;
       }
       this.updateCamera(elapsed);
-      this.updatePieceVisuals();
+      this.updatePieceVisuals(alpha);
+      this.structureVisuals.render(alpha);
       this.fracture.render(alpha);
     }
     this.renderer.render(this.scene, this.camera);
@@ -613,6 +733,7 @@ export class TownGame {
       materials = new Set<THREE.Material>(),
       textures = new Set<THREE.Texture>();
     this.fracture?.dispose();
+    this.structureVisuals?.dispose();
     this.scene.traverse((o) => {
       if (o instanceof THREE.Mesh) {
         if (o instanceof THREE.InstancedMesh) o.dispose();

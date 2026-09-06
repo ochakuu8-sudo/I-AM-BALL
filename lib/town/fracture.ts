@@ -4,7 +4,7 @@ import type { BreakBurst, BreakSource } from './simulation';
 
 export const FRAGMENTS = {
   capacity: 384,
-  physicsBodies: 24,
+  physicsBodies: 4,
   burstWindow: 0.24,
 };
 type Family = 'masonry' | 'wood' | 'metal' | 'foliage';
@@ -228,7 +228,7 @@ export class FractureEffects {
   familyFor(kind: string, color: THREE.Color): Family {
     if (kind === 'tree') return color.g > color.r * 0.8 ? 'foliage' : 'wood';
     if (kind === 'hedge') return 'foliage';
-    if (['crate', 'bench'].includes(kind)) return 'wood';
+    if (['crate', 'bench', 'floor'].includes(kind)) return 'wood';
     if (['car', 'bin', 'lamp', 'tower'].includes(kind)) return 'metal';
     return 'masonry';
   }
@@ -299,12 +299,22 @@ export class FractureEffects {
     f.position.add(
       this.temp.set(source.position.x, source.position.y, source.position.z),
     );
+    if (burst.retained && burst.mode === 'impact')
+      f.position.lerp(
+        this.temp.set(burst.origin.x, burst.origin.y, burst.origin.z),
+        0.88,
+      );
     const speed = Math.hypot(burst.velocity.x, burst.velocity.z);
     let dx = burst.velocity.x,
       dz = burst.velocity.z;
     if (speed < 0.1) {
       dx = source.position.x - burst.origin.x;
       dz = source.position.z - burst.origin.z;
+    }
+    if (Math.hypot(dx, dz) < 0.01) {
+      const a = this.random() * Math.PI * 2;
+      dx = Math.cos(a);
+      dz = Math.sin(a);
     }
     const length = Math.hypot(dx, dz) || 1;
     dx /= length;
@@ -313,8 +323,8 @@ export class FractureEffects {
     const angle =
       side *
       (tier === 'small'
-        ? 0.25 + this.random() * 1.15
-        : 0.65 + this.random() * 0.8);
+        ? 0.35 + this.random() * 1.8
+        : 0.65 + this.random() * 1.15);
     const forward = collapse
       ? 0.4 + this.random() * 1.7
       : (tier === 'small' ? 10 : tier === 'medium' ? 6.5 : 3.2) *
@@ -382,8 +392,13 @@ export class FractureEffects {
       };
       this.budgets.set(key, budget);
     }
-    const counts =
-      burst.mode === 'impact'
+    const counts = burst.retained
+      ? burst.mode === 'impact'
+        ? { large: 0, medium: 5, small: 20 }
+        : burst.mode === 'landing'
+          ? { large: 0, medium: 6, small: 12 }
+          : { large: 0, medium: 2, small: 8 }
+      : burst.mode === 'impact'
         ? { large: 3, medium: 10, small: 22 }
         : { large: 4, medium: 16, small: 16 };
     for (const tier of tiers) {
