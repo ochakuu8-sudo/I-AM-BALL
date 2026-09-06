@@ -9,8 +9,7 @@ import {
   type Piece,
 } from './simulation';
 import { registerGameTools } from './webmcp';
-import { OrbitInput, screenToWorld } from './controls';
-import { CameraBoom, cameraFov } from './camera';
+import { CAMERA, OrbitInput, screenToWorld } from './controls';
 export type GameStats = {
   speed: number;
   airborne: boolean;
@@ -44,7 +43,6 @@ export class TownGame {
   visuals: Visual[] = [];
   pieceVisuals: PieceVisual[] = [];
   orbit = new OrbitInput();
-  cameraBoom = new CameraBoom();
   matrix = new THREE.Matrix4();
   scaleTemp = new THREE.Vector3();
   previousImpact = 0;
@@ -429,7 +427,7 @@ export class TownGame {
       camera: {
         yaw: this.orbit.yaw,
         pitch: this.orbit.pitch,
-        distance: this.cameraBoom.distance,
+        distance: CAMERA.distance,
       },
       renderer: {
         drawCalls: this.renderer.info.render.calls,
@@ -504,7 +502,6 @@ export class TownGame {
     if (!this.sim) return;
     this.cancelOrbit();
     this.orbit.reset();
-    this.cameraBoom.reset();
     this.updateCamera(0);
   }
   frame = (now: number) => {
@@ -590,35 +587,22 @@ export class TownGame {
       v = this.sim.ball.linvel(),
       speed = Math.hypot(v.x, v.z);
     const { yaw, pitch } = this.orbit;
-    // Keep the sweep's starting sphere inside the ball's collider, away from walls and ceilings.
     this.target.set(p.x, p.y + 0.35, p.z);
     this.cameraDirection.set(
       -Math.sin(yaw) * Math.cos(pitch),
       Math.sin(pitch),
       -Math.cos(yaw) * Math.cos(pitch),
     );
-    const distance = 17 + speed * 0.12;
-    const cameraRadius = this.cameraBoom.update(
-      this.sim.world,
-      this.target,
-      this.cameraDirection,
-      distance,
-      dt,
-    );
     this.camera.position
       .copy(this.target)
-      .addScaledVector(this.cameraDirection, cameraRadius);
+      .addScaledVector(this.cameraDirection, CAMERA.distance);
     this.camera.lookAt(this.target);
-    const fov = cameraFov(
-      cameraRadius,
-      this.camera.aspect,
-      TUNING.radius,
-      52 + Math.min(7, speed * 0.25),
+    const fov = 52 + Math.min(7, speed * 0.25);
+    this.camera.fov = THREE.MathUtils.lerp(
+      this.camera.fov,
+      fov,
+      1 - Math.exp(-3 * dt),
     );
-    this.camera.fov =
-      fov > this.camera.fov
-        ? fov
-        : THREE.MathUtils.lerp(this.camera.fov, fov, 1 - Math.exp(-3 * dt));
     this.camera.updateProjectionMatrix();
   }
   dispose() {
