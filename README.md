@@ -1,7 +1,9 @@
 # Rolling Town — 坂道の街
 
 Blenderで作った住宅街をボールで自由に走る、PC・スマートフォン向けのThree.js試作です。
-確認用URL: https://rolling-town-study.ochakuu8.chatgpt.site （所有者限定）
+公開URL: https://ochakuu8-sudo.github.io/I-AM-BALL/
+
+リポジトリ: https://github.com/ochakuu8-sudo/I-AM-BALL
 
 ## 操作
 
@@ -20,7 +22,7 @@ Blenderで作った住宅街をボールで自由に走る、PC・スマート�
 
 - **TypeScript + Three.js**: 街・ボール・影・追従カメラを描画。
 - **Rapier**: 球、坂、家、車、ジャンプ台、動く木箱・コーンの当たり判定。1/60秒固定更新と描画補間。
-- **React + Vite / Vinext**: 画面上の操作パネルと開発・プレビュー環境。ゲーム本体はクライアントで動作し、ゲーム用バックエンドは不要。
+- **React + Vite**: 画面上の操作パネルと静的ビルド・プレビュー環境。ゲーム本体はクライアントで動作し、ゲーム用バックエンドは不要。
 - 配布時は`dist/client`へHTML・JavaScript・GLBを静的出力します。Three.jsと物理処理は`lib/town`に独立させています。
 - **Blender 5.2**: 屋根・窓枠・玄関・バルコニー・雨どいなどをモデリング。家の3色の派生から14棟の街区を構成。
 
@@ -46,8 +48,15 @@ npm run build
 ```
 
 `scripts/test-physics.mjs`は、坂の接地・加速旋回ブレーキ・ジャンプ・ジャンプ入力の先行受付・高速での家との衝突・木箱・ジャンプ台・リセット・描画頻度の違いを9シナリオで確認します。数値結果は`art/physics-report.json`に保存されます。
-`scripts/build.mjs`はWindowsで静的出力直後に発生するCLIの終了処理エラーを避けるため、成功時にイベントループの終了を待ちます。ビルド失敗の終了コードは保持します。
 ブラウザのWebMCP対応環境では、状態取得・一時停止/再開・リセットも利用できます。未対応環境でもゲームは動作します。
+
+## GitHub Pagesへの公開
+
+`main`にpushすると、GitHub Actionsが型検査・ゲーム部分のlint・物理テスト・静的ビルドを実行し、成功した出力だけをGitHub Pagesに公開します。手動実行はActionsの「Deploy GitHub Pages」から行えます。
+
+ワークフローは`.github/workflows/pages.yml`です。配信ファイルは`dist/client`、ビルド時の`PAGES_BASE_PATH`は`/I-AM-BALL`です。ローカル開発ではこの環境変数を指定せず、ルートURLから動作します。
+
+GitHubリポジトリのSettings → Pages → Build and deploymentは「GitHub Actions」を使用します。追加のサービス用APIキーは不要です。
 
 ## Blenderとアセット
 
