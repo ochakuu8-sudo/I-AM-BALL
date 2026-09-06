@@ -1,0 +1,67 @@
+{
+  "engine": "Rapier",
+  "fixedStep": 0.016666666666666666,
+  "tests": [
+    {
+      "test": "Downhill ground contact stays stable for ten seconds",
+      "status": "pass",
+      "minimumClearance": 0.716,
+      "position": {
+        "x": -0.102118581533432,
+        "y": 0.7189887166023254,
+        "z": 7.745563983917236
+      }
+    },
+    {
+      "test": "Acceleration, turning, and braking respond on flat ground",
+      "status": "pass",
+      "speedAfter1_5Seconds": 90,
+      "speedAfterBraking": 0.004471468377401191
+    },
+    {
+      "test": "Jump has useful height, cannot double-jump, and lands",
+      "status": "pass",
+      "jumpHeight": 1.72,
+      "jumps": 1
+    },
+    {
+      "test": "Buffered jump fires just after landing",
+      "status": "pass",
+      "jumps": 1
+    },
+    {
+      "test": "Ball cannot tunnel through a house at high speed",
+      "status": "pass",
+      "minimumX": -12.137147903442383
+    },
+    {
+      "test": "Movable crate is pushed by the ball",
+      "status": "pass",
+      "crateTravel": 5.4322148506332075
+    },
+    {
+      "test": "Street ramp sends a rolling ball into the air",
+      "status": "pass",
+      "maxHeight": 2.24225643157959
+    },
+    {
+      "test": "Reset restores ball, counters, and movable props",
+      "status": "pass",
+      "propsRestored": 15
+    },
+    {
+      "test": "30, 60, and 144 Hz render schedules produce the same physics",
+      "status": "pass",
+      "rates": [
+        30,
+        60,
+        144
+      ],
+      "position": {
+        "x": 17.733312606811523,
+        "y": 0.6847118735313416,
+        "z": 67.10023498535156
+      }
+    }
+  ]
+}

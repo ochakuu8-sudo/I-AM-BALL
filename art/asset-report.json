@@ -1,0 +1,12 @@
+{
+  "houses": 14,
+  "mergedMeshes": 30,
+  "polygons": 72469,
+  "files": {
+    "colliders.json": 3040,
+    "cone.glb": 12832,
+    "crate.glb": 15432,
+    "house.glb": 506016,
+    "town.glb": 9297188
+  }
+}
